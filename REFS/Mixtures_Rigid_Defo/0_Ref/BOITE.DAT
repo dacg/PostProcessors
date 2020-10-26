@@ -1,0 +1,23 @@
+#BOITE.DAT...................#
+#2345678901234567890123456789:
+#----------------------------:
+VLOC_DOF_BODIES              :
+4                            :  Nb wall
+23                           :  Nb Rigid
+27                           :  Nb Mailx
+-1                           :  Numero du pas
+#----------------------------:
+##############################
+## Pour tout les pas de temps ##
+##############################
+COMPACITY                    :
+COORDINATION                 :
+ANISOTROPIES FROM CONTACTS   :
+##############################
+## Pour 1 seul pas de temps ##
+##############################
+#WRITE ONE PS FILE            :
+#1                            : Trace les particle
+#0                            : Trace les lignes de contacts
+#1                            : Trace les forces de contacts
+END                          :

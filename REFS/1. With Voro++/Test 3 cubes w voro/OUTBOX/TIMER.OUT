@@ -1,0 +1,31 @@
+Internal timers: 
+                         Elapsed time :   Elapsed ratio :
+ 
+ - i Compute Mass         0.1000000D-05 s          0.00 %
+ - i Compute Multi Mass   0.1000000D-05 s          0.00 %
+ - i Compute Fext         0.4000000D-05 s          0.00 %
+ - i Compute Multi Fext   0.5000000D-05 s          0.00 %
+ - i Compute Bulk         0.4000000D-05 s          0.00 %
+ - i Compute Multi Bulk   0.5000000D-05 s          0.00 %
+ - i Compute Free Vel     0.6000000D-05 s          0.00 %
+ - i Compute Free State   0.1000000D-05 s          0.00 %
+ - i Recup CSASp          0.0000000D+00 s          0.00 %
+ - i Updt Tact NLGS 3D    0.9200000D-03 s          0.00 %
+ - i Compute Dof          0.1100000D-04 s          0.00 %
+ - i Compute Field        0.2000000D-05 s          0.00 %
+ - i Compute Dof Multi    0.1000000D-05 s          0.00 %
+ - i Compute Field Mult   0.2000000D-05 s          0.00 %
+ - i Update Dof           0.0000000D+00 s          0.00 %
+ - i Update Bulk          0.1000000D-05 s          0.00 %
+ - i Update Dof Multi     0.4000000D-05 s          0.00 %
+ - i Update Bulk Multi    0.4000000D-05 s          0.00 %
+                        -----------------
+  Accounted time          0.9720000D-03 s          0.00 %
+  Total elapsed time      0.3002557D+03
+ 
+User timers: 
+                         Elapsed time :   Elapsed ratio :
+ 
+                        -----------------
+  Accounted time          0.0000000D+00 s          0.00 %
+  Total elapsed time      0.3002557D+03

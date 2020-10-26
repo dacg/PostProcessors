@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">
+<Collection><DataSet timestep="0.0001" group="" part="0" file="./rigids_1.vtu"/>
+<DataSet timestep="0.0002" group="" part="0" file="./rigids_2.vtu"/>
+<DataSet timestep="0.0003" group="" part="0" file="./rigids_3.vtu"/>
+<DataSet timestep="0.0004" group="" part="0" file="./rigids_4.vtu"/>
+<DataSet timestep="0.0005" group="" part="0" file="./rigids_5.vtu"/>
+</Collection>
+</VTKFile>

@@ -1,0 +1,357 @@
+<?xml version="1.0"?>
+<VTKFile type="UnstructuredGrid" version="0.1" byte_order="BigEndian">
+  <UnstructuredGrid>
+    <Piece NumberOfPoints="           1" NumberOfCells="           1">
+      <Points>
+        <DataArray type="Float64" NumberOfComponents="3" Name="Point" format="ascii">
+-0.631918802613194E-004 0.600794999968279E-002 0.749999799999933E+000
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+           0
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Int8" Name="types" format="ascii">
+    1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32"  Name="Id" NumberOfComponents="1" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Float64"  Name="displacement" NumberOfComponents="3" format="ascii">
+-0.631918802613264E-004 0.600794999968277E-002-0.750000200000067E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="velocity" NumberOfComponents="3" format="ascii">
+ 0.169812800352922E-012 0.766470929085328E-013 0.239585763884128E-012
+        </DataArray>
+        <DataArray type="Float64"  Name="Reac" NumberOfComponents="3" format="ascii">
+-0.265493512291348E-005-0.133297617820098E-005-0.440461047057075E-005
+        </DataArray>
+        <DataArray type="Float64"  Name="Fext" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="alpha" NumberOfComponents="3" format="ascii">
+ 0.999999999999992E+000 0.100193904279732E-006-0.711550386360480E-007
+        </DataArray>
+        <DataArray type="Float64"  Name="beta" NumberOfComponents="3" format="ascii">
+-0.100193916351223E-006 0.999999999999981E+000-0.169650570462245E-006
+        </DataArray>
+        <DataArray type="Float64"  Name="gamma" NumberOfComponents="3" format="ascii">
+ 0.711550216380936E-007 0.169650577591546E-006 0.999999999999983E+000
+        </DataArray>
+      </PointData>
+    </Piece>
+    <Piece NumberOfPoints="           1" NumberOfCells="           1">
+      <Points>
+        <DataArray type="Float64" NumberOfComponents="3" Name="Point" format="ascii">
+-0.355342404852604E-005-0.342436304478093E-005 0.175000009999998E+001
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+           0
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Int8" Name="types" format="ascii">
+    1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32"  Name="Id" NumberOfComponents="1" format="ascii">
+           2
+        </DataArray>
+        <DataArray type="Float64"  Name="displacement" NumberOfComponents="3" format="ascii">
+-0.355342404853298E-005-0.342436304479481E-005-0.749999900000024E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="velocity" NumberOfComponents="3" format="ascii">
+ 0.175538875522463E-012 0.163046049813114E-012 0.267550897179009E-012
+        </DataArray>
+        <DataArray type="Float64"  Name="Reac" NumberOfComponents="3" format="ascii">
+-0.295269261164305E-005-0.289099339435085E-005-0.485150238477847E-005
+        </DataArray>
+        <DataArray type="Float64"  Name="Fext" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="alpha" NumberOfComponents="3" format="ascii">
+ 0.999999999994598E+000 0.328220304643810E-005 0.175264144700017E-006
+        </DataArray>
+        <DataArray type="Float64"  Name="beta" NumberOfComponents="3" format="ascii">
+-0.328220308743978E-005 0.999999999994586E+000 0.233942402002429E-006
+        </DataArray>
+        <DataArray type="Float64"  Name="gamma" NumberOfComponents="3" format="ascii">
+-0.175263376852603E-006-0.233942977253682E-006 0.999999999999957E+000
+        </DataArray>
+      </PointData>
+    </Piece>
+    <Piece NumberOfPoints="           1" NumberOfCells="           1">
+      <Points>
+        <DataArray type="Float64" NumberOfComponents="3" Name="Point" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+           0
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Int8" Name="types" format="ascii">
+    1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32"  Name="Id" NumberOfComponents="1" format="ascii">
+           3
+        </DataArray>
+        <DataArray type="Float64"  Name="displacement" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="velocity" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Reac" NumberOfComponents="3" format="ascii">
+ 0.388277730155156E+002-0.483122629689588E+001-0.999999858129590E+002
+        </DataArray>
+        <DataArray type="Float64"  Name="Fext" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="alpha" NumberOfComponents="3" format="ascii">
+ 0.100000000000000E+001 0.411052900000000E-011 0.237390400000000E-009
+        </DataArray>
+        <DataArray type="Float64"  Name="beta" NumberOfComponents="3" format="ascii">
+-0.411053008587164E-011 0.100000000000000E+001 0.457420200000000E-008
+        </DataArray>
+        <DataArray type="Float64"  Name="gamma" NumberOfComponents="3" format="ascii">
+-0.237390399981198E-009-0.457420200000098E-008 0.100000000000000E+001
+        </DataArray>
+      </PointData>
+    </Piece>
+    <Piece NumberOfPoints="           1" NumberOfCells="           1">
+      <Points>
+        <DataArray type="Float64" NumberOfComponents="3" Name="Point" format="ascii">
+ 0.000000000000000E+000-0.225000000000000E+001 0.200000000000000E+001
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+           0
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Int8" Name="types" format="ascii">
+    1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32"  Name="Id" NumberOfComponents="1" format="ascii">
+           4
+        </DataArray>
+        <DataArray type="Float64"  Name="displacement" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="velocity" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Reac" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Fext" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="alpha" NumberOfComponents="3" format="ascii">
+ 0.100000000000000E+001 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="beta" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.612323400000000E-016-0.100000000000000E+001
+        </DataArray>
+        <DataArray type="Float64"  Name="gamma" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.100000000000000E+001 0.612323400000000E-016
+        </DataArray>
+      </PointData>
+    </Piece>
+    <Piece NumberOfPoints="           1" NumberOfCells="           1">
+      <Points>
+        <DataArray type="Float64" NumberOfComponents="3" Name="Point" format="ascii">
+ 0.000000000000000E+000 0.225000000000000E+001 0.200000000000000E+001
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+           0
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Int8" Name="types" format="ascii">
+    1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32"  Name="Id" NumberOfComponents="1" format="ascii">
+           5
+        </DataArray>
+        <DataArray type="Float64"  Name="displacement" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="velocity" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Reac" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Fext" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="alpha" NumberOfComponents="3" format="ascii">
+ 0.100000000000000E+001 0.162185200000000E-010 0.142553200000000E-010
+        </DataArray>
+        <DataArray type="Float64"  Name="beta" NumberOfComponents="3" format="ascii">
+-0.142553200003793E-010 0.233839100000000E-010 0.100000000000000E+001
+        </DataArray>
+        <DataArray type="Float64"  Name="gamma" NumberOfComponents="3" format="ascii">
+ 0.162185199996667E-010-0.100000000000000E+001 0.233839100002312E-010
+        </DataArray>
+      </PointData>
+    </Piece>
+    <Piece NumberOfPoints="           1" NumberOfCells="           1">
+      <Points>
+        <DataArray type="Float64" NumberOfComponents="3" Name="Point" format="ascii">
+ 0.225000000000000E+001 0.000000000000000E+000 0.200000000000000E+001
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+           0
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Int8" Name="types" format="ascii">
+    1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32"  Name="Id" NumberOfComponents="1" format="ascii">
+           6
+        </DataArray>
+        <DataArray type="Float64"  Name="displacement" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="velocity" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Reac" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Fext" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="alpha" NumberOfComponents="3" format="ascii">
+ 0.612323400000000E-016 0.000000000000000E+000 0.100000000000000E+001
+        </DataArray>
+        <DataArray type="Float64"  Name="beta" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.100000000000000E+001 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="gamma" NumberOfComponents="3" format="ascii">
+-0.100000000000000E+001 0.000000000000000E+000 0.612323400000000E-016
+        </DataArray>
+      </PointData>
+    </Piece>
+    <Piece NumberOfPoints="           1" NumberOfCells="           1">
+      <Points>
+        <DataArray type="Float64" NumberOfComponents="3" Name="Point" format="ascii">
+-0.225000000000000E+001 0.000000000000000E+000 0.200000000000000E+001
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+           0
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Int8" Name="types" format="ascii">
+    1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32"  Name="Id" NumberOfComponents="1" format="ascii">
+           7
+        </DataArray>
+        <DataArray type="Float64"  Name="displacement" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="velocity" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Reac" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="Fext" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="alpha" NumberOfComponents="3" format="ascii">
+ 0.612323400000000E-016 0.000000000000000E+000-0.100000000000000E+001
+        </DataArray>
+        <DataArray type="Float64"  Name="beta" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.100000000000000E+001 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="gamma" NumberOfComponents="3" format="ascii">
+ 0.100000000000000E+001 0.000000000000000E+000 0.612323400000000E-016
+        </DataArray>
+      </PointData>
+    </Piece>
+    <Piece NumberOfPoints="           1" NumberOfCells="           1">
+      <Points>
+        <DataArray type="Float64" NumberOfComponents="3" Name="Point" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.249999999999988E+001
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+           0
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+           1
+        </DataArray>
+        <DataArray type="Int8" Name="types" format="ascii">
+    1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32"  Name="Id" NumberOfComponents="1" format="ascii">
+           8
+        </DataArray>
+        <DataArray type="Float64"  Name="displacement" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000-0.150000000000012E+001
+        </DataArray>
+        <DataArray type="Float64"  Name="velocity" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.363376429640683E-012
+        </DataArray>
+        <DataArray type="Float64"  Name="Reac" NumberOfComponents="3" format="ascii">
+-0.388277674078878E+002 0.483123052086545E+001 0.999999950690718E+002
+        </DataArray>
+        <DataArray type="Float64"  Name="Fext" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000-0.100000000000000E+003
+        </DataArray>
+        <DataArray type="Float64"  Name="alpha" NumberOfComponents="3" format="ascii">
+ 0.100000000000000E+001 0.000000000000000E+000 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="beta" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.100000000000000E+001 0.000000000000000E+000
+        </DataArray>
+        <DataArray type="Float64"  Name="gamma" NumberOfComponents="3" format="ascii">
+ 0.000000000000000E+000 0.000000000000000E+000 0.100000000000000E+001
+        </DataArray>
+      </PointData>
+    </Piece>
+  </UnstructuredGrid>
+</VTKFile>
