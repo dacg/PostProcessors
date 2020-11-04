@@ -1,9 +1,0 @@
-<?xml version="1.0"?>
-<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">
-<Collection><DataSet timestep="0.0001" group="" part="0" file="./inters_1.vtp"/>
-<DataSet timestep="0.0002" group="" part="0" file="./inters_2.vtp"/>
-<DataSet timestep="0.0003" group="" part="0" file="./inters_3.vtp"/>
-<DataSet timestep="0.0004" group="" part="0" file="./inters_4.vtp"/>
-<DataSet timestep="0.0005" group="" part="0" file="./inters_5.vtp"/>
-</Collection>
-</VTKFile>

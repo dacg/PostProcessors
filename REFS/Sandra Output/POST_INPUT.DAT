@@ -1,9 +1,0 @@
-###### VISU SPHERES VTK ######
-INFO SAMPLE                  :
-6                            : Number of walls
-19992                        : Number of particles
-0.4                          : Friction coefficient between particles (Mobilization field)
-NEGATIVE FORCES              : Activate if 0 or negative forces are valid
-FORCE BARS SCALE             :
-0.1                          : Force scale parameter (Only compresive forces --> 0.1 works fine)
-END                          :

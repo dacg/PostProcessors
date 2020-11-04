@@ -1,0 +1,54 @@
+VLOC_DOF_BODIES              :
+6                            : Number of walls
+10000                        : Number of particles
+1                            : First historic file to read 
+#COMPACITY                    :
+COORDINATION                 :
+#CONTACTS TYPE                : Number of Mstck, Stick, Slide, and noctc contacts
+#FAILURE TYPE                 : The failure mode of the contacts are infered
+#1                            : Ratio CN/CT
+#WALLS POSITION               :
+#WALLS FORCES                 :
+#AVERAGE VELOCITY             :
+#Q/P                          :
+#1                            : 0 = Does not write the tensor, 1 =  Writes the whole tensor SIGMA
+#CONTACT ANISOTROPIES         :
+#BRANCHE ANISOTROPIES         :
+#PDF                          :
+#WRITE ALL GMV                :
+#WRITE ALL VTK                :
+#1                            :
+#KSI RESEAU                   :
+#CONTACT ORIENTATION          :
+#CONTACT DISTRIBUTION         :
+#CONSTRUCT BODIES             :
+#PROFILES                     :
+#CHI TENSORS                  :
+#COHESIVE TENSORS             : Decomposition of the stress tensor in compressive and tensile parts
+####
+####
+#WRITE VISU POV               : Needs POV-Ray to run
+#1                            : 0: Perspective camera. 1. Front camera
+#2                            : 0: Skip the render. 1: Render low quality. 2. High quality. 3 Brutal 
+#1                            : 0: Desactivate. 1: Activate. Animation. Works only if render is present
+#2                            : 0: Desactivate, 1: Grid borders. 2: Clean borders
+#1                            : 0: Desactivate, 1: Random colors, 2 Volumen,
+#0.6                          : Transparency [0,1]
+#####          Note the rendering may take longer!
+####
+#VORONOI                      : Voronoi tessellation
+#74                           : n_subparticles. Note the final number of subparticles may vary
+#CRACKING                     : Activate the cracking Post processing. A new vloc_rloc is written
+#1.0                          : Percentage of contacts fissured
+#CLEAN_TRESCA                 : It should be used when only one historic file has been stored!
+#2                            : Number of cells per particle
+#GRANULOMETRY                 : Compute the granulometry of the sample. If cohesive cluster you SHOULD use #MSTCK BELOW
+#MSTCK                        : Activate to compute of the cohesive couples relations
+#PARTICLES SURFACE            :
+#SPECIFIC SURFACE             : You should activate MSTCK
+#ENERGY SPLIT                 : 
+#DRAW                         :
+#COORDINATION PER CLASS       :
+#STRESSES PER CLASS           :
+GRAIN SHAPE PER CLASS        :
+END                          :
