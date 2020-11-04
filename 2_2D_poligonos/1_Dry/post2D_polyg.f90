@@ -1232,6 +1232,13 @@ subroutine qoverp
   
   Moment = Moment / (height*width)
   
+  if (first_over_all) then
+    write(103,*) '#   time     ', '     s11     ', '     s12     ', '     s22     ', &
+                                  '      S1     ', '      S2     ', '(S1-S2)/(S1+S2)', '  theta_s  '
+  endif
+
+  write(103,'(4(1X,E12.5))', advance='no') time, Moment(1,1), Moment(1,2), Moment(2,2)
+
   lda  = 2
   matz = 1
   
@@ -1244,12 +1251,8 @@ subroutine qoverp
   ang_c = abs(0.5*atan2(-2*Moment(1,2),(Moment(1,1)-Moment(2,2))))
 
   ang_c = ang_c*180/pi
-  
-  if (first_over_all) then
-    write(103,*) '#   time     ', '      S1     ', '      S2     ', '(S1-S2)/(S1+S2)', '  theta_s  '
-  endif
-  
-  write(103,'(8(1X,E12.5))') time, S1,S2,(S1-S2)/(S1+S2), ang_c, Moment(1,1), Moment(1,2), Moment(2,2)
+
+  write(103,'(4(1X,E12.5))') S1,S2,(S1-S2)/(S1+S2), ang_c
   
   print*, 'Write QoverP                    ---> Ok!'
   
@@ -2617,9 +2620,16 @@ subroutine list_interact
 
   implicit none
 
-  integer                                  :: i
+  integer                                  :: i, cd_loc, an_loc
+  real*8                                   :: Lnik, Ltik
+  real*8, dimension(2)                     :: Lik, nik, tik
   character(len=29)                        :: file_c
   logical                                  :: dir_ctcdir
+
+  ! Initializing
+  Lik(:) = 0
+  Lnik = 0
+  Ltik = 0
 
   ! Cleaning or creating the folder if necessary
   if (first_over_all) then
@@ -2656,14 +2666,30 @@ subroutine list_interact
   ! Writing the heading
   write(114,*) '   CD     ', '   AN     ', '   CTC_LEN   ', &
                '      FN     ', '      FT     ', '    GAP_0    ', '     GAP     ', &
-               '    DISP_T   '
-
+               '    DISP_T   ', '      LN     ', '      LT     ', '   STATUS    '
   do i=1, nb_ligneCONTACT
-    write(114,'(2(1X,I9),6(1X,E12.5),(1X,A5),(1X,A5))') TAB_CONTACT(i)%icdent, TAB_CONTACT(i)%ianent, &
+    if (TAB_CONTACT(i)%nature == 'PLJCx') cycle
+    cd_loc = TAB_CONTACT(i)%icdent
+    an_loc = TAB_CONTACT(i)%ianent
+    nik(1)  = TAB_CONTACT(i)%n(1)
+    nik(2)  = TAB_CONTACT(i)%n(2)
+    tik(1)  = TAB_CONTACT(i)%t(1)
+    tik(2)  = TAB_CONTACT(i)%t(2)
+
+    ! The branch vector
+    Lik(1) = TAB_POLYG(cd_loc)%center(1) - TAB_POLYG(an_loc)%center(1)
+    Lik(2) = TAB_POLYG(cd_loc)%center(2) - TAB_POLYG(an_loc)%center(2)
+    
+    ! The components
+    Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
+    Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
+
+    write(114,'(2(1X,I9),8(1X,E12.5), 2(1X,A5))') TAB_CONTACT(i)%icdent, TAB_CONTACT(i)%ianent, &
                                         TAB_CONTACT(i)%cd_len, &
                                         TAB_CONTACT(i)%rn, TAB_CONTACT(i)%rt, &
                                         TAB_CONTACT(i)%gap0, TAB_CONTACT(i)%gap, &
-                                        TAB_CONTACT(i)%tang_disp, TAB_CONTACT(i)%law, TAB_CONTACT(i)%status
+                                        TAB_CONTACT(i)%tang_disp, Lnik, Ltik, &
+                                        TAB_CONTACT(i)%law, TAB_CONTACT(i)%status
   end do
 
   close(114)
@@ -3869,7 +3895,6 @@ subroutine test_position_contact
   height = (ymax - ymin)
   
 end subroutine test_position_contact
-
 
 !==============================================================================
 !CONSTRUCTION D UN NOUVEAU BODIES DOF ET DRV_DOF...
