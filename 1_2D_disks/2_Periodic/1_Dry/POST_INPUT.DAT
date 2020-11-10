@@ -1,0 +1,17 @@
+#COPY IMPUT                   :
+VLOC_DOF_BODIES              :
+2                            : Number of walls
+39993                        : Number of particles
+1                            : Type of wall (0: Plane, 1: Cluster)
+WALLS POSITION               :
+WALLS FORCES                 :
+#COMPACITY                    :
+#QoverP                       :
+#COORDINATION                 :
+#CONTACTS ORIENTATION         :
+#ANISOTROPY CONTACT           :
+#ANISOTROPY FORCE             :
+#GRAIN SIZE DISTRIB           :
+#DRAW                         :
+#CONTACT NUMBER PROBABILITY   :
+END                          :

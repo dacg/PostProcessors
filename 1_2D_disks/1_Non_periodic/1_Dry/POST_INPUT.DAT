@@ -1,0 +1,16 @@
+#COPY IMPUT                   :
+VLOC_DOF_BODIES              :
+4                            : Number of walls
+10000                        : Number of particles
+#WALLS POSITION               :
+#WALLS FORCES                 :
+#COMPACITY                    :
+#QoverP                       :
+#COORDINATION                 :
+#CONTACTS ORIENTATION         :
+#ANISOTROPY CONTACT           :
+#ANISOTROPY FORCE             :
+#GRAIN SIZE DISTRIB           :
+#DRAW                         :
+CONTACT NUMBER PROBABILITY   :
+END                          :
