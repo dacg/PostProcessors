@@ -3,7 +3,7 @@
 ############################################################
 
 # Importing functions
-import glob
+import sys, glob
 
 # Local functions
 from functions_dkdk import *
@@ -20,8 +20,7 @@ h_frame = 'all'                 # Options: 'all': for all frames in the OUTBOX.
 c_wall_position = True
 c_wall_forces   = True
 c_compacity     = True
-
-
+c_shape_ratio   = True
 
 ############################################################
 # The postprocessor
@@ -40,27 +39,25 @@ else:
   last_frame = h_frame[1]
 #
 
-# Variable letting us know if we have initialized the list of bodies
-initialize_bodies = False
-for ii in range(init_frame,last_frame,1):
-  # Checking if we have initialize bodies
-  if ( not init_frame):
-    bodies_init = init_bodies()
-    initialize_bodies = True
-  #
+print ('Analysing frames: ', init_frame, ' to ', last_frame)
 
-  # Reading the historic file. This allocates contacts and bodies_current
-  bodies_current, contacts = read_historic(bodies_init)
+# One time functions
+# Initializing bodies 
+bodies = init_bodies()
+
+# Looping the desired frames
+for ii in range(init_frame,last_frame,1):
+
+  # Reading the historic file. This allocates contacts and updates variables in bodies for current configuration
+  bodies, contacts = read_historic(ii,bodies)
+
+  print (bodies[0].veloc)
 
   # Computing the parameters that are needed
-  if (c_wall_position):
-    wall_position(ii,last_frame,bodies_current,contacts)
+  #if (c_wall_position): wall_position(ii,last_frame,bodies_current,contacts)
+  #if (c_wall_forces): wall_forces(ii,last_frame,bodies_current,contacts)
+  #if (c_compacity): compacity(ii,last_frame,bodies_current,contacts)
   #
-  if (c_wall_forces):
-    wall_forces(ii,last_frame,bodies_current,contacts)
-  #
-  if (c_compacity):
-    compacity(ii,last_frame,bodies_current,contacts)
-  #
+
 #
 

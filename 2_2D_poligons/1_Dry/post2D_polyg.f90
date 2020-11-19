@@ -67,7 +67,8 @@ integer                                    ::  calcul_construct_bodies=0, &
                                                c_draw = 0, calcul_anisotropy_branch=0, c_n_ctc_probability = 0, &
                                                c_f_list=0, option_cohe=0, c_fail_mode=0, c_list_interact=0, &
                                                c_brc_dir=0, c_frc_dir=0, c_sign_aniso=0, c_clean_tresca=0, &
-                                               c_multi_part_frac=0
+                                               c_multi_part_frac=0, c_avg_shape_ratio=0, c_sign_aniso_l=0, &
+                                               c_list_interact_l = 0
 
 !Variables DavidC.
 real(kind=8), allocatable, dimension(:,:)  ::  tab_temp_disp
@@ -245,6 +246,26 @@ do
     cycle
   end if
 
+  if (command=='SHAPE RATIO                  :') then
+    c_avg_shape_ratio = 1
+    ! Uses port 124
+    open (unit=124,file='./POSTPRO/AVG_SHAPE.DAT',status='replace')
+    cycle
+  end if
+
+  if (command=='SIGNED ANISOTROPIES L        :') then
+    c_sign_aniso_l = 1
+    ! Uses port 125
+    open (unit=125,file='./POSTPRO/SGN_ANISO_L.DAT',status='replace')
+    cycle
+  end if
+
+  if (command=='LIST INTERACTIONS L          :') then
+    c_list_interact_l=1
+    ! Uses port 126
+    cycle
+  end if
+
   if (command=='IS COHESIVE                  :') then
     option_cohe=1
     cycle
@@ -296,6 +317,13 @@ close(1)
     if (c_frc_dir                   == 1)  call forces_dir
     if (c_sign_aniso                == 1)  call signed_anisotropy
     if (c_clean_tresca              == 1)  call clean_tresca
+    if (c_sign_aniso_l              == 1)  call signed_anisotropy_l
+    if (c_list_interact_l           == 1)  call list_interact_l
+
+    ! One step subroutines 
+    if (first_over_all) then
+      if (c_avg_shape_ratio           == 1)  call avg_shape_ratio
+    end if
 
     if (fin_post) then
       call close_all
@@ -860,7 +888,8 @@ SUBROUTINE read_Vloc_dof_bodies
       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%rs       = TAB_CONTACT(i)%rs
       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%nature   = TAB_CONTACT(i)%nature
       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%type     = 1
-      TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%status_points   = TAB_CONTACT(i)%status_points
+      TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%status_points = TAB_CONTACT(i)%status_points
+      TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%status   = TAB_CONTACT(i)%status
     end if
     if (TAB_CONTACT(i)%type==2) then
       if (first_double) then
@@ -1219,7 +1248,7 @@ subroutine qoverp
     Rnik    = TAB_CONTACT_POLYG(i)%rn
     
     ! Only active contacts
-    if (abs(Rnik) .le. 1.D-8) cycle
+    if (abs(Rnik) .le. 1.D-9 .and. abs(Rnik) .le. 1.D-9) cycle
     
     Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
     Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
@@ -1283,7 +1312,9 @@ subroutine nb_coordination
     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
     ! Contacts in the box
     ! Computing the number of contacts if they are active
-    if (abs(TAB_CONTACT_POLYG(i)%rn) .gt. 1e-9) then
+    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1e-9 .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1e-9) then
+      cycle 
+    else 
       zc=zc+1
     end if
   end do
@@ -2666,15 +2697,17 @@ subroutine list_interact
   ! Writing the heading
   write(114,*) '   CD     ', '   AN     ', '   CTC_LEN   ', &
                '      FN     ', '      FT     ', '    GAP_0    ', '     GAP     ', &
-               '    DISP_T   ', '      LN     ', '      LT     ', '   STATUS    '
-  do i=1, nb_ligneCONTACT
-    if (TAB_CONTACT(i)%nature == 'PLJCx') cycle
-    cd_loc = TAB_CONTACT(i)%icdent
-    an_loc = TAB_CONTACT(i)%ianent
-    nik(1)  = TAB_CONTACT(i)%n(1)
-    nik(2)  = TAB_CONTACT(i)%n(2)
-    tik(1)  = TAB_CONTACT(i)%t(1)
-    tik(2)  = TAB_CONTACT(i)%t(2)
+               '    DISP_T   ', '      LN     ', '      LT     '!, '   STATUS    '
+  do i=1, nb_ligneCONTACT_POLYG
+    if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
+    cd_loc  = TAB_CONTACT_POLYG(i)%icdent
+    an_loc  = TAB_CONTACT_POLYG(i)%ianent
+    nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
+    nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
+    tik(1)  = TAB_CONTACT_POLYG(i)%t(1)
+    tik(2)  = TAB_CONTACT_POLYG(i)%t(2)
+
+    if (TAB_CONTACT_POLYG(i)%rn .lt. 1e-9 .and. TAB_CONTACT_POLYG(i)%rt .lt. 1e-9) cycle
 
     ! The branch vector
     Lik(1) = TAB_POLYG(cd_loc)%center(1) - TAB_POLYG(an_loc)%center(1)
@@ -2684,12 +2717,12 @@ subroutine list_interact
     Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
     Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
 
-    write(114,'(2(1X,I9),8(1X,E12.5), 2(1X,A5))') TAB_CONTACT(i)%icdent, TAB_CONTACT(i)%ianent, &
-                                        TAB_CONTACT(i)%cd_len, &
-                                        TAB_CONTACT(i)%rn, TAB_CONTACT(i)%rt, &
-                                        TAB_CONTACT(i)%gap0, TAB_CONTACT(i)%gap, &
-                                        TAB_CONTACT(i)%tang_disp, Lnik, Ltik, &
-                                        TAB_CONTACT(i)%law, TAB_CONTACT(i)%status
+    write(114,'(2(1X,I9),8(1X,E12.5))') TAB_CONTACT_POLYG(i)%icdent, TAB_CONTACT_POLYG(i)%ianent, &
+                                                  TAB_CONTACT_POLYG(i)%cd_len, &
+                                                  TAB_CONTACT_POLYG(i)%rn, TAB_CONTACT_POLYG(i)%rt, &
+                                                  TAB_CONTACT_POLYG(i)%gap0, TAB_CONTACT_POLYG(i)%gap, &
+                                                  TAB_CONTACT_POLYG(i)%tang_disp, Lnik, Ltik!, &
+                                                  !TAB_CONTACT_POLYG(i)%law!, TAB_CONTACT_POLYG(i)%status
   end do
 
   close(114)
@@ -2697,6 +2730,112 @@ subroutine list_interact
   print*, 'Write Interaction List          ---> Ok!'
 end subroutine list_interact
 
+
+!================================================
+! Listing the interactions on frame L
+!================================================
+subroutine list_interact_l
+
+  implicit none
+
+  integer                                  :: i, cd_loc, an_loc
+  real*8                                   :: Lnik, Ltik, Rnik, Rtik
+  real*8                                   :: Force_N, Force_T, Norme_LN, Norme_LT
+  real*8, dimension(2)                     :: Lik, nik, tik, Fik, nik_c, tik_c
+  character(len=31)                        :: file_c
+  logical                                  :: dir_ctcdir
+
+  ! Initializing
+  Lik(:) = 0
+  Lnik = 0
+  Ltik = 0
+
+  ! Cleaning or creating the folder if necessary
+  if (first_over_all) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/INTER_LIST_L', exist=dir_ctcdir)
+    if(dir_ctcdir) then
+      ! Cleaning
+      call system('rm ./POSTPRO/INTER_LIST_L/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/INTER_LIST_L')
+    end if
+  end if
+
+  ! The file name
+  file_c       =  './POSTPRO/INTER_LIST_L/F_L.    '
+
+  if (compteur_clout<10) then
+    write(file_c(28:28),'(I1)')   compteur_clout
+  else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
+    write(file_c(28:29),'(I2)')   compteur_clout
+  else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
+    write(file_c(28:30),'(I3)')   compteur_clout
+  else if ( (compteur_clout>=1000).and. (compteur_clout<10000) ) then
+    write(file_c(28:31),'(I4)')   compteur_clout
+  else
+    print*, "The list interact cannot handle more files"
+    stop
+  end if
+
+  ! Opening the file
+  open(unit=126,file=file_c,status='replace')
+
+  ! Writing the heading
+  write(126,*) '   CD     ', '   AN     ', '   CTC_LEN   ', &
+               '      FN     ', '      FT     ', '    GAP_0    ', '     GAP     ', &
+               '    DISP_T   ', '      LN     ', '      LT     '!, '   STATUS    '
+  do i=1, nb_ligneCONTACT_POLYG
+    if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
+    cd_loc  = TAB_CONTACT_POLYG(i)%icdent
+    an_loc  = TAB_CONTACT_POLYG(i)%ianent
+    nik_c(1)  = TAB_CONTACT_POLYG(i)%n(1)
+    nik_c(2)  = TAB_CONTACT_POLYG(i)%n(2)
+    tik_c(1)  = TAB_CONTACT_POLYG(i)%t(1)
+    tik_c(2)  = TAB_CONTACT_POLYG(i)%t(2)
+    Rnik  = TAB_CONTACT_POLYG(i)%rn
+    Rtik  = TAB_CONTACT_POLYG(i)%rt
+
+    if (TAB_CONTACT_POLYG(i)%rn .lt. 1e-9 .and. TAB_CONTACT_POLYG(i)%rt .lt. 1e-9) cycle
+
+    ! The branch vector
+    Lik(1) = TAB_POLYG(cd_loc)%center(1) - TAB_POLYG(an_loc)%center(1)
+    Lik(2) = TAB_POLYG(cd_loc)%center(2) - TAB_POLYG(an_loc)%center(2)
+
+        ! The new frame on L
+    nik(1) = Lik(1)/(Lik(1)**2 + Lik(2)**2)**0.5
+    nik(2) = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
+    tik(1) = nik(2)
+    tik(2) = -nik(1)
+
+    ! Building the stress tensor (on the contact frame)
+    Fik(1) = (Rnik*nik_c(1)+Rtik*tik_c(1))
+    Fik(2) = (Rnik*nik_c(2)+Rtik*tik_c(2))
+
+    ! Forces on the L frame 
+    Force_N = Fik(1)*nik(1) + Fik(2)*nik(2)
+    Force_T = Fik(1)*tik(1) + Fik(2)*tik(2)
+
+    Norme_LN = (Lik(1)*nik(1) + Lik(2)*nik(2))
+    Norme_LT = (Lik(1)*tik(1) + Lik(2)*tik(2))
+    
+    ! The components
+    Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
+    Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
+
+    write(126,'(2(1X,I9),8(1X,E12.5))') TAB_CONTACT_POLYG(i)%icdent, TAB_CONTACT_POLYG(i)%ianent, &
+                                                  TAB_CONTACT_POLYG(i)%cd_len, &
+                                                  Force_N, Force_T, &
+                                                  TAB_CONTACT_POLYG(i)%gap0, TAB_CONTACT_POLYG(i)%gap, &
+                                                  TAB_CONTACT_POLYG(i)%tang_disp, Norme_LN, Norme_LT !, &
+                                                  !TAB_CONTACT_POLYG(i)%law!, TAB_CONTACT_POLYG(i)%status
+  end do
+
+  close(126)
+
+  print*, 'Write Interaction List L       ---> Ok!'
+end subroutine list_interact_l
 
 !==================================================================================================
 !Procedure pour calcul des contacts persistant ...
@@ -3432,14 +3571,14 @@ subroutine signed_anisotropy
     an      = TAB_CONTACT_POLYG(i)%ianent
 
     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9 ) cycle
+    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-9) cycle
 
     nik(1) = TAB_CONTACT_POLYG(i)%n(1)
     nik(2) = TAB_CONTACT_POLYG(i)%n(2)
     tik(1) = TAB_CONTACT_POLYG(i)%t(1)
     tik(2) = TAB_CONTACT_POLYG(i)%t(2)
-    Rtik    = TAB_CONTACT_POLYG(i)%rt
-    Rnik    = TAB_CONTACT_POLYG(i)%rn
+    Rtik   = TAB_CONTACT_POLYG(i)%rt
+    Rnik   = TAB_CONTACT_POLYG(i)%rn
 
     Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
     Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
@@ -3486,7 +3625,7 @@ subroutine signed_anisotropy
     an      = TAB_CONTACT_POLYG(j)%ianent
 
     if (TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
-    if (abs(TAB_CONTACT_POLYG(j)%rn)==0.D0 ) cycle
+    if (abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-9) cycle
 
     nik(1) = TAB_CONTACT_POLYG(j)%n(1)
     nik(2) = TAB_CONTACT_POLYG(j)%n(2)
@@ -3591,7 +3730,7 @@ subroutine signed_anisotropy
     an = TAB_CONTACT_POLYG(i)%ianent
 
     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-8) cycle
+    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-9) cycle
 
     nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
     nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
@@ -3661,12 +3800,12 @@ subroutine signed_anisotropy
      write(117,*) '#   time     ', '      ac     ', '      aln    ', '      alt    ', '      afn    ', '      aft    ', &
                                    '     ac_s    ', '     aln_s   ', '     alt_s   ', '     afn_s   ', '     aft_s   ', &
                                    '     t_c     ', '     t_ln    ', '     t_lt    ', '     t_fn    ', '     t_ft    ', &
-                                   '     t_si    '
+                                   '     t_si    ', '     FN    ', '     FT    ', '     LN    ', '     LT    '
   end if 
-  write(117,'(17(1X,E12.5))')   time,ac,aln,alt,afn,aft,&
+  write(117,'(21(1X,E12.5))')   time,ac,aln,alt,afn,aft,&
                                       ac_signe,aln_signe,alt_signe,afn_signe,aft_signe,&
-                                      theta_c,theta_ln,theta_lt,theta_fn,theta_ft,theta_sigma
-
+                                      theta_c,theta_ln,theta_lt,theta_fn,theta_ft, &
+                                      theta_sigma, mean_FN, mean_FT, mean_LN, mean_LT
   deallocate(tab_C)
   deallocate(tab_FN)
   deallocate(tab_FT)
@@ -3677,6 +3816,368 @@ subroutine signed_anisotropy
   print*, 'Signed anisotropies     ---> Ok!'
 
 end subroutine signed_anisotropy
+
+
+!==============================================================================
+! Calcul des ansiotropies de contacts signees a partir des tenseurs H sur le repere L
+!==============================================================================
+subroutine signed_anisotropy_l
+
+  implicit none
+
+  integer                                             ::  i,j,cd,an,Nsect_orientation
+  real(kind=8)                                        ::  ac,aln,alt,afn,aft,&
+                                                          ac_signe,aln_signe,alt_signe,afn_signe,aft_signe,&
+                                                          theta_c,theta_ln,theta_lt,theta_fn,theta_ft, theta_sigma, &
+                                                          double_product,double_product_sign
+
+  real(kind=8)                                        ::  Force_N,Force_T,Norme_LN,Norme_LT,alpha, Rtik, Rnik, &
+                                                          sect,cpt,mean_FN,mean_LN,mean_LT,mean_FT
+
+  real(kind=8),dimension(2)                           ::  nik,tik,Lik,nik_alpha,tik_alpha, Fik, nik_c,tik_c
+  real(kind=8),dimension(2,2)                         ::  Fabric,HN,HT,LN,LT,Matrice, Moment
+  real(kind=8),dimension(:),allocatable               ::  tab_alpha,tab_FN,tab_FT,tab_LN,tab_LT,tab_C,tab_nx
+
+  real(kind=8)                             :: S1,S2
+  real(kind=8),dimension(2,2)              :: localframe
+  real(kind=8),dimension(2)                :: wr,wi
+  integer                                  :: ierror,matz,lda
+
+
+  Nsect_orientation = 18
+  allocate(tab_alpha(Nsect_orientation))
+  tab_alpha = 0
+  sect = pi / real(Nsect_orientation,8)
+  tab_alpha(1) = sect
+
+  do i=2,Nsect_orientation
+    tab_alpha(i)=tab_alpha(i-1)+sect
+  end do
+
+  if (allocated(tab_C)) deallocate(tab_C)
+  allocate(tab_C(Nsect_orientation))
+
+  if (allocated(tab_FN)) deallocate(tab_FN)
+  allocate(tab_FN(Nsect_orientation))
+
+  if (allocated(tab_FT)) deallocate(tab_FT)
+  allocate(tab_FT(Nsect_orientation))
+
+  if (allocated(tab_LN)) deallocate(tab_LN)
+  allocate(tab_LN(Nsect_orientation))
+
+  if (allocated(tab_LT)) deallocate(tab_LT)
+  allocate(tab_LT(Nsect_orientation))
+
+  if (allocated(tab_nx)) deallocate(tab_nx)
+  allocate(tab_nx(Nsect_orientation))
+
+  tab_C   =  0
+  tab_FN  =  0
+  tab_FT  =  0
+  tab_LN  =  0
+  tab_LT  =  0
+  tab_nx  =  0
+
+  mean_LN = 0
+  mean_LT = 0
+  mean_FN = 0
+  mean_FT = 0
+
+  cpt = 0
+
+  do i=1,nb_ligneCONTACT_POLYG
+    cd      = TAB_CONTACT_POLYG(i)%icdent
+    an      = TAB_CONTACT_POLYG(i)%ianent
+
+    if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
+    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-9) cycle
+
+    nik_c(1) = TAB_CONTACT_POLYG(i)%n(1)
+    nik_c(2) = TAB_CONTACT_POLYG(i)%n(2)
+    tik_c(1) = TAB_CONTACT_POLYG(i)%t(1)
+    tik_c(2) = TAB_CONTACT_POLYG(i)%t(2)
+    Rtik     = TAB_CONTACT_POLYG(i)%rt
+    Rnik     = TAB_CONTACT_POLYG(i)%rn
+
+    Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
+    Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
+
+    ! The new frame on L
+    nik(1) = Lik(1)/(Lik(1)**2 + Lik(2)**2)**0.5
+    nik(2) = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
+    tik(1) = nik(2)
+    tik(2) = -nik(1)
+
+    ! Building the stress tensor (on the contact frame)
+    Fik(1) = (Rnik*nik_c(1)+Rtik*tik_c(1))
+    Fik(2) = (Rnik*nik_c(2)+Rtik*tik_c(2))
+    
+    Moment(1,1:2) = Fik(1)*Lik(1:2) + Moment(1,1:2)
+    Moment(2,1:2) = Fik(2)*Lik(1:2) + Moment(2,1:2)
+  
+    !Force_N = TAB_CONTACT_POLYG(i)%rn !TAB_CONTACT_POLYG(i)%F(1)*nik(1) + TAB_CONTACT_POLYG(i)%F(2)*nik(2)
+    !Force_T = TAB_CONTACT_POLYG(i)%rt !TAB_CONTACT_POLYG(i)%F(1)*tik(1) + TAB_CONTACT_POLYG(i)%F(2)*tik(2)
+
+    ! Forces on the L frame 
+    Force_N = Fik(1)*nik(1) + Fik(2)*nik(2)
+    Force_T = Fik(1)*tik(1) + Fik(2)*tik(2)
+
+    Norme_LN = (Lik(1)*nik(1) + Lik(2)*nik(2))
+    Norme_LT = (Lik(1)*tik(1) + Lik(2)*tik(2))
+
+    mean_FN = mean_FN + Force_N
+    mean_LN = mean_LN + Norme_LN
+    mean_FT = mean_FT + Force_T
+    mean_LT = mean_LT + Norme_LT
+
+    cpt = cpt + 1.0
+  end do
+
+  ! Computing the stress tensor
+  Moment = Moment / (height*width)
+  
+  ! Finding the orientation of the stress tensor
+  theta_sigma = abs( 0.5* atan2( -2*Moment(1,2) , (Moment(1,1)-Moment(2,2)) ) )
+
+  mean_FN = mean_FN/cpt
+  mean_LN = mean_LN/cpt
+  mean_LT = mean_LT/cpt
+  mean_FT = mean_FT/cpt
+
+  Force_N  = 0.
+  Force_T  = 0.
+  Norme_LN = 0.
+  Norme_LT = 0.
+
+  do j=1,nb_ligneCONTACT_POLYG
+    cd      = TAB_CONTACT_POLYG(j)%icdent
+    an      = TAB_CONTACT_POLYG(j)%ianent
+
+    if (TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
+    if (abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-9) cycle
+
+    nik_c(1) = TAB_CONTACT_POLYG(j)%n(1)
+    nik_c(2) = TAB_CONTACT_POLYG(j)%n(2)
+    tik_c(1) = TAB_CONTACT_POLYG(j)%t(1)
+    tik_c(2) = TAB_CONTACT_POLYG(j)%t(2)
+    Rtik     = TAB_CONTACT_POLYG(j)%rt
+    Rnik     = TAB_CONTACT_POLYG(j)%rn
+
+    Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
+    Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
+
+    ! The new frame on L
+    nik(1) = Lik(1)/(Lik(1)**2 + Lik(2)**2)**0.5
+    nik(2) = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
+    tik(1) = nik(2)
+    tik(2) = -nik(1)
+
+    ! Building the stress tensor (on the contact frame)
+    Fik(1) = (Rnik*nik_c(1)+Rtik*tik_c(1))
+    Fik(2) = (Rnik*nik_c(2)+Rtik*tik_c(2))
+
+    !Force_N  = TAB_CONTACT_POLYG(j)%rn !TAB_CONTACT_POLYG(i)%F(1)*nik(1) + TAB_CONTACT_POLYG(i)%F(2)*nik(2)
+    !Force_T  = TAB_CONTACT_POLYG(j)%rt !TAB_CONTACT_POLYG(i)%F(1)*tik(1) + TAB_CONTACT_POLYG(i)%F(2)*tik(2)
+
+    ! Forces on the L frame 
+    Force_N = Fik(1)*nik(1) + Fik(2)*nik(2)
+    Force_T = Fik(1)*tik(1) + Fik(2)*tik(2)
+
+    Norme_LN = ( Lik(1)*nik(1) + Lik(2)*nik(2) )
+    Norme_LT = ( Lik(1)*tik(1) + Lik(2)*tik(2) )
+
+    if (Norme_LT<0.0000001) Norme_LT = 0
+    if ( nik(2)<0 ) then
+      nik(1) = -nik(1)
+      nik(2) = -nik(2)
+    end If
+
+    alpha = acos(nik(1))
+
+    do i=1,Nsect_orientation
+    if (i==1) then
+      if (alpha<tab_alpha(i)) then
+        tab_C(i)     = tab_C(i)  + 1.0
+        tab_FN(i)    = tab_FN(i) + Force_N
+        tab_FT(i)    = tab_FT(i) + Force_T
+        tab_LN(i)    = tab_LN(i) + Norme_LN
+        tab_LT(i)    = tab_LT(i) + Norme_LT
+        tab_nx(i)    = tab_nx(i) + alpha
+        exit
+      end if
+      else if ((i>1).and.(i<Nsect_orientation)) then
+      if ((alpha>=tab_alpha(i-1)).and.(alpha<tab_alpha(i))) then
+        tab_C(i)     = tab_C(i)  + 1.0
+        tab_FN(i)    = tab_FN(i) + Force_N
+        tab_FT(i)    = tab_FT(i) + Force_T
+        tab_LN(i)    = tab_LN(i) + Norme_LN
+        tab_LT(i)    = tab_LT(i) + Norme_LT
+        tab_nx(i)    = tab_nx(i) + alpha
+        exit
+      end if
+      else if (i==Nsect_orientation) then
+        if ((alpha<=tab_alpha(i)).and.(alpha>=tab_alpha(i-1))) then
+          tab_C(i)     = tab_C(i)  + 1.0
+          tab_FN(i)    = tab_FN(i) + Force_N
+          tab_FT(i)    = tab_FT(i) + Force_T
+          tab_LN(i)    = tab_LN(i) + Norme_LN
+          tab_LT(i)    = tab_LT(i) + Norme_LT
+          tab_nx(i)    = tab_nx(i) + alpha
+        end if
+      end if
+    end do
+  end do
+
+  do i=1,Nsect_orientation
+    if (tab_C(i)==0) cycle
+    tab_FN(i) = tab_FN(i)/tab_C(i)
+    tab_FT(i) = tab_FT(i)/tab_C(i)
+    tab_LN(i) = tab_LN(i)/tab_C(i)
+    tab_LT(i) = tab_LT(i)/tab_C(i)
+    tab_nx(i) = tab_nx(i)/tab_C(i)
+  end do
+
+  HN(:,:) = 0
+  HT(:,:) = 0
+  LN(:,:) = 0
+  LT(:,:) = 0
+
+  do i=1,Nsect_orientation
+    nik_alpha(1) = cos(tab_nx(i))
+    nik_alpha(2) = sin(tab_nx(i))
+    tik_alpha(1) =  nik_alpha(2)
+    tik_alpha(2) = -nik_alpha(1)
+
+    !######
+    HN(1,1:2) = HN(1,1:2) + tab_FN(i)*nik_alpha(1)*nik_alpha(1:2)
+    HN(2,1:2) = HN(2,1:2) + tab_FN(i)*nik_alpha(2)*nik_alpha(1:2)
+    !######
+    HT(1,1:2) = HT(1,1:2) + tab_FT(i)*nik_alpha(1)*tik_alpha(1:2)
+    HT(2,1:2) = HT(2,1:2) + tab_FT(i)*nik_alpha(2)*tik_alpha(1:2)
+    !######
+    LN(1,1:2) = LN(1,1:2) + tab_LN(i)*nik_alpha(1)*nik_alpha(1:2)
+    LN(2,1:2) = LN(2,1:2) + tab_LN(i)*nik_alpha(2)*nik_alpha(1:2)
+    !######
+    LT(1,1:2) = LT(1,1:2) + tab_LT(i)*nik_alpha(1)*tik_alpha(1:2)
+    LT(2,1:2) = LT(2,1:2) + tab_LT(i)*nik_alpha(2)*tik_alpha(1:2)
+    !######
+  end do
+
+  HN = HN / ( mean_FN*real(Nsect_orientation,8) )
+  HT = HT / ( mean_FN*real(Nsect_orientation,8) )
+  LN = LN / ( mean_LN*real(Nsect_orientation,8) )
+  LT = LT / ( mean_LN*real(Nsect_orientation,8) )
+
+  cpt = 0.D0
+  Fabric = 0.D0
+
+  do i=1,nb_ligneCONTACT_POLYG
+    cd = TAB_CONTACT_POLYG(i)%icdent
+    an = TAB_CONTACT_POLYG(i)%ianent
+
+    if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
+    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-9) cycle
+
+    !nik_c(1) = TAB_CONTACT_POLYG(i)%n(1)
+    !nik_c(2) = TAB_CONTACT_POLYG(i)%n(2)
+    !tik_c(1) = TAB_CONTACT_POLYG(i)%t(1)
+    !tik_c(2) = TAB_CONTACT_POLYG(i)%t(2)
+
+    Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
+    Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
+
+    ! The new frame on L
+    nik(1) = Lik(1)/(Lik(1)**2 + Lik(2)**2)**0.5
+    nik(2) = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
+    tik(1) = nik(2)
+    tik(2) = -nik(1)
+
+    !nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
+    !nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
+
+    Fabric(1,1:2) = nik(1)*nik(1:2) + Fabric(1,1:2)
+    Fabric(2,1:2) = nik(2)*nik(1:2) + Fabric(2,1:2)
+
+    cpt = cpt + 1
+  end do
+
+  Fabric = Fabric / cpt
+
+  !!!!! CONTACT !!!!!
+  Matrice = Fabric
+  ac = ( 2*sqrt(  (Matrice(1,1)-Matrice(2,2))**2 + 4*Matrice(1,2)**2))/(Matrice(1,1)+Matrice(2,2))
+  theta_c = abs( 0.5* atan2( -2*Matrice(1,2) , (Matrice(1,1)-Matrice(2,2)) ) ) ! ATTENTION IL FAUT UTILISER LA FONCTION TAN2 DE FORTRAN !
+  ac_signe = ac*cos(2*(theta_c-theta_sigma))
+
+  !!!!! FORCE NORMALE !!!!!
+  Matrice = HN
+  afn = ( 2*sqrt(  (Matrice(1,1)-Matrice(2,2))**2 + 4*Matrice(1,2)**2   ) )/(Matrice(1,1)+Matrice(2,2))
+  theta_fn = abs( 0.5* atan2( -2*Matrice(1,2) , (Matrice(1,1)-Matrice(2,2)) ) ) ! ATTENTION IL FAUT UTILISER LA FONCTION TAN2 DE FORTRAN !
+  afn_signe = afn*cos(2*(theta_fn-theta_sigma))
+
+  !!!!! FORCE TANGENTE !!!!!
+  Matrice = HT
+  if ( (Matrice(1,1)==0.0) .and. (Matrice(2,2) == 0.0) ) Then
+    aft = 0
+    aft_signe = 0
+    theta_ft = 0
+  else
+    aft = ( 2*sqrt(  (Matrice(1,1)-Matrice(2,2))**2 + 4*Matrice(1,2)**2   ) )/(HN(1,1)+HN(2,2))
+    theta_ft = abs( 0.5* atan2( -2*Matrice(1,2) , (Matrice(1,1)-Matrice(2,2)) ) ) ! ATTENTION IL FAUT UTILISER LA FONCTION TAN2 DE FORTRAN !
+    aft_signe = aft*cos(2*(theta_ft-theta_sigma))
+    if (aft .lt. 1D-8) then
+      theta_ft=0.
+      aft = 0.
+      aft_signe =0.
+    end if
+  end if
+
+  !!!!! BRANCHE NORMALE !!!!!
+  Matrice = LN
+  aln = ( 2*sqrt(  (Matrice(1,1)-Matrice(2,2))**2 + 4*Matrice(1,2)**2   ) )/(Matrice(1,1)+Matrice(2,2))
+  theta_ln = abs( 0.5* atan2( -2*Matrice(1,2) , (Matrice(1,1)-Matrice(2,2)) ) ) ! ATTENTION IL FAUT UTILISER LA FONCTION TAN2 DE FORTRAN !
+  aln_signe = aln*cos(2*(theta_ln-theta_sigma))
+
+  !!!!! BRANCHE TANGENTE !!!!!
+  Matrice = LT
+  alt = ( 2*sqrt(  (Matrice(1,1)-Matrice(2,2))**2 + 4*Matrice(1,2)**2   ) )/(LN(1,1)+LN(2,2))
+  Theta_lt = abs( 0.5* atan2( -2*Matrice(1,2) , (Matrice(1,1)-Matrice(2,2)) ) ) ! ATTENTION IL FAUT UTILISER LA FONCTION TAN2 DE FORTRAN !
+  alt_signe = alt*cos(2*(theta_lt-theta_sigma))
+
+  double_product = 0.5*(ac*aln + ac*afn + aln*afn + alt*aft)
+  double_product_sign = 0.5*(ac_signe*aln_signe + ac_signe*afn_signe + aln_signe*afn_signe + alt_signe*aft_signe)
+
+  !write(117,'(30(1X,D12.5))')   temps,epsilon1,epsilon_q,&
+  !ac,aln,alt,afn,aft,&
+  !0.5*( ac+afn+aft+aln+alt ), &
+  !0.5*( ac+afn+aft+aln+alt ) / (1+double_product),&
+  !ac_signe,aln_signe,alt_signe,afn_signe,aft_signe,&
+  !0.5*( ac_signe+afn_signe+aft_signe+aln_signe+alt_signe ), &
+  !0.5*( ac_signe+afn_signe+aft_signe+aln_signe+alt_signe )/ (1+double_product_sign), &
+  !theta_c,theta_ln,Theta_lt,theta_fn,theta_ft,theta_sigma
+
+  if (first_over_all) then
+     write(125,*) '#   time     ', '      ac     ', '      aln    ', '      alt    ', '      afn    ', '      aft    ', &
+                                   '     ac_s    ', '     aln_s   ', '     alt_s   ', '     afn_s   ', '     aft_s   ', &
+                                   '     t_c     ', '     t_ln    ', '     t_lt    ', '     t_fn    ', '     t_ft    ', &
+                                   '     t_si    ', '     FN    ', '     FT    ', '     LN    ', '     LT    '
+  end if 
+  write(125,'(21(1X,E12.5))')   time, ac, aln,  alt,  afn,  aft,&
+                                      ac_signe,aln_signe,alt_signe,afn_signe,aft_signe,&
+                                      theta_c, theta_ln,theta_lt,theta_fn,theta_ft, & 
+                                      theta_sigma, mean_FN, mean_FT, mean_LN, mean_LT
+
+  deallocate(tab_C)
+  deallocate(tab_FN)
+  deallocate(tab_FT)
+  deallocate(tab_LN)
+  deallocate(tab_LT)
+  deallocate(tab_nx)
+
+  print*, 'Signed anisotropies L   ---> Ok!'
+
+end subroutine signed_anisotropy_l
 
 !==============================================================================
 ! Clean TRESCA from parasit aditional contacts
@@ -3819,6 +4320,82 @@ subroutine clean_tresca
     print*, 'Cleaning Tresca          ---> Ok!'
   end if
 end subroutine clean_tresca
+
+!==============================================================================
+! Computing the average shape ratio
+!==============================================================================
+subroutine avg_shape_ratio
+  
+  implicit none 
+  
+  integer                                   :: i, j, n_sides
+  real*8                                    :: short_h, long_l, avg_ratio, min_l, max_l, leng_l
+  real*8                                    :: avg_radius
+  real*8, dimension(2)                      :: max_vec, test_vec, orth_vec_uni
+
+  ! Initializing variables
+  short_h = 0
+  long_l  = 0
+  avg_ratio = 0
+  avg_radius = 0
+  
+  ! For all the particles
+  do i=1, n_particles
+
+    ! Storing the radius
+    avg_radius = avg_radius + TAB_POLYG(i)%radius
+    
+    n_sides = TAB_POLYG(i)%nb_vertex
+    min_l =-9999.
+    max_l =-9999.
+
+    ! Finding the long side
+    do j=1, n_sides
+      leng_l = (TAB_POLYG(i)%vertex_ref(1,j)**2 + TAB_POLYG(i)%vertex_ref(2,j)**2)**0.5
+      if (leng_l > max_l) then
+        max_l = leng_l
+        max_vec(1) = TAB_POLYG(i)%vertex_ref(1,j)
+        max_vec(2) = TAB_POLYG(i)%vertex_ref(2,j)
+      end if
+    end do
+
+    orth_vec_uni(1) = -max_vec(2)
+    orth_vec_uni(2) =  max_vec(1)
+
+    orth_vec_uni = orth_vec_uni/((orth_vec_uni(1)**2 + orth_vec_uni(2)**2)**0.5)
+
+    ! Finding the orthogonal projection of 
+    do j=1, n_sides
+      ! The projection on the orthogonal vector
+      test_vec(1) = TAB_POLYG(i)%vertex_ref(1,j)
+      test_vec(2) = TAB_POLYG(i)%vertex_ref(2,j)
+      leng_l = abs(test_vec(1)*orth_vec_uni(1)+test_vec(2)*orth_vec_uni(2))
+
+      if (leng_l > min_l) then
+        min_l = leng_l
+      end if
+    end do
+
+    short_h = short_h + min_l
+    long_l  = long_l  + max_l
+
+    avg_ratio = avg_ratio + min_l/max_l
+  end do
+  
+  short_h = short_h/n_particles
+  long_l  = long_l/n_particles
+  avg_ratio = avg_ratio/n_particles
+  avg_radius = avg_radius/n_particles
+  
+  if (first_over_all) then
+     write(124,*) '#   time     ', '     <h>     ', '     <L>     ', '    <h/L>    ', '    <rad>    '
+  end if
+  
+  write(124,'(5(1X,E12.5))') time, short_h, long_l, avg_ratio, avg_radius
+
+  print*, 'Write Average aspect ratio   ---> Ok!'
+  
+end subroutine avg_shape_ratio
 
 !==============================================================================
 ! Vitesse moyenne
@@ -4153,6 +4730,8 @@ end subroutine construct_bodies
    if (c_n_ctc_probability              == 1)  close (111)
    if (c_fail_mode                      == 1)  close (113)
    if (c_sign_aniso                     == 1)  close (117)
+   if (c_avg_shape_ratio                == 1)  close (124)
+   if (c_sign_aniso_l                     == 1)  close (125)
   end subroutine close_all
 
 !==============================================================================
