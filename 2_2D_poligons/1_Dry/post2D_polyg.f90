@@ -51,8 +51,7 @@ real(kind=8)                                ::  time
 
 !DEFINITIONS BOITE
 !================================================
-real(kind=8),dimension(2,4)                ::  tab_sommet_box
-real(kind=8)                               ::  long,haut,height,width
+real(kind=8)                               ::  height,width
 
 !COMMANDES D APPELLE
 !================================================
@@ -68,7 +67,7 @@ integer                                    ::  calcul_construct_bodies=0, &
                                                c_f_list=0, option_cohe=0, c_fail_mode=0, c_list_interact=0, &
                                                c_brc_dir=0, c_frc_dir=0, c_sign_aniso=0, c_clean_tresca=0, &
                                                c_multi_part_frac=0, c_avg_shape_ratio=0, c_sign_aniso_l=0, &
-                                               c_list_interact_l = 0
+                                               c_list_interact_l = 0, c_ctc_dir_l=0, c_brc_dir_l=0, c_frc_dir_l=0
 
 !Variables DavidC.
 real(kind=8), allocatable, dimension(:,:)  ::  tab_temp_disp
@@ -239,6 +238,12 @@ do
     cycle
   end if
 
+  if (command=='DRAW                         :') then
+    c_draw = 1
+    ! Uses port 121
+    cycle
+  end if
+
   if (command=='CLEAN TRESCA                 :') then
     c_clean_tresca = 1
     ! Uses port 118 and 123
@@ -266,14 +271,26 @@ do
     cycle
   end if
 
-  if (command=='IS COHESIVE                  :') then
-    option_cohe=1
+  if (command=='CONTACTS ORIENTATION L       :') then
+    c_ctc_dir_l=1
+    cycle
+    ! Uses port 127
+  end if
+
+  if (command=='BRANCH DISTRIBUTION L        :') then
+    c_brc_dir_l = 1
+    ! Uses port 128
     cycle
   end if
 
-  if (command=='DRAW                         :') then
-    c_draw = 1
-    ! Uses port 121
+  if (command=='FORCES DISTRIBUTION L        :') then
+    c_frc_dir_l = 1
+    ! Uses port 129
+    cycle
+  end if
+
+  if (command=='IS COHESIVE                  :') then
+    option_cohe=1
     cycle
   end if
   
@@ -319,6 +336,9 @@ close(1)
     if (c_clean_tresca              == 1)  call clean_tresca
     if (c_sign_aniso_l              == 1)  call signed_anisotropy_l
     if (c_list_interact_l           == 1)  call list_interact_l
+    if (c_ctc_dir_l                 == 1)  call ctc_dir_l
+    if (c_brc_dir_l                 == 1)  call brc_dir_l
+    if (c_frc_dir_l                 == 1)  call frc_dir_l
 
     ! One step subroutines 
     if (first_over_all) then
@@ -2466,6 +2486,143 @@ subroutine contact_direction
 end subroutine contact_direction
 
 !==============================================================================
+! Branch orientations
+!==============================================================================
+subroutine ctc_dir_l
+  
+  implicit none
+  
+  integer                                       :: i, j, ninter, contotal, contmean
+  integer                                       :: cd, an
+  real(kind=8)                                  :: interval
+  real(kind=8)                                  :: angcurr, maxint, minint
+  real(kind=8), dimension(2)                    :: nik, Lik
+  real(kind=8), dimension(:,:), allocatable     :: theta_interval
+  character(len=27)                             :: nom
+  logical                                       :: dir_ctcdir
+  
+
+  Lik(:) = 0
+  nik(:) = 0
+
+  ! Cleaning or creating the folder if necessary
+  if (first_over_all) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/CTCD_L', exist=dir_ctcdir)
+    if(dir_ctcdir) then
+      ! Cleaning
+      call system('rm ./POSTPRO/CTCD_L/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/CTCD_L')
+    end if
+  end if
+  
+  ! The file name
+  nom       =  './POSTPRO/CTCD_L/CDRL.    '
+  
+  if (compteur_clout<10) then
+    WRITE(nom(23:24),'(I1)')   compteur_clout
+  else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
+    WRITE(nom(23:25),'(I2)')   compteur_clout
+  else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
+    WRITE(nom(23:26),'(I3)')   compteur_clout
+  else if ( (compteur_clout>=1000).and. (compteur_clout<10000) ) then
+    WRITE(nom(23:27),'(I4)')   compteur_clout
+  else 
+    print*, "Out of numbers ---> Orientations L"
+    stop
+  end if
+  
+  ! Number of intervals over pi
+  ninter = 18
+  
+  ! Initializing variables
+  contotal = 0
+  interval = pi/ninter
+  
+  ! Allocating the vector that will contain the contact direction and frequency
+  if (allocated(theta_interval)) deallocate(theta_interval)
+  allocate(theta_interval(ninter,2))
+  
+  ! Computing the contact direction and initializing the frequency
+  do i=1, ninter
+    theta_interval(i,1) = (interval/2)*(2*i-1)
+    theta_interval(i,2) = 0
+  end do
+  
+  ! Computing the frequency for each interval
+  do i=1, ninter
+    ! The width of the interval
+    minint = interval*(i - 1)
+    maxint = interval*i
+
+    do j=1,nb_ligneCONTACT_POLYG
+
+      cd = TAB_CONTACT_POLYG(j)%icdent
+      an = TAB_CONTACT_POLYG(j)%ianent
+
+      ! Only between discs
+      if(TAB_CONTACT_POLYG(j)%nature /='PLPLx') cycle
+      ! Only active contacts
+      if(abs(TAB_CONTACT_POLYG(j)%rn) .le. 1.D-8 .and. abs(TAB_CONTACT_POLYG(j)%rt) .le. 1.D-8) cycle
+      
+      ! The branch vector
+      Lik(1) = TAB_POLYG(cd)%center(1) - TAB_POLYG(an)%center(1)
+      Lik(2) = TAB_POLYG(cd)%center(2) - TAB_POLYG(an)%center(2)
+
+      ! The normal vector
+      nik(1)  = Lik(1)/(Lik(1)**2 + Lik(2)**2)**0.5
+      nik(2)  = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
+      
+      ! The 1 and 2 quadrants only
+      ! Changing the normal vector direction if necessary
+      if(nik(2) .lt. 0) then
+        nik(1)  = -nik(1)
+        nik(2)  = -nik(2)
+      end if
+      
+      ! Finding the current angle. Note the vector nik is already unitary!
+      angcurr = acos(nik(1))
+      
+      ! Checking the interval
+      if(angcurr .lt. maxint .and. angcurr .ge. minint) then
+        theta_interval(i,2) = theta_interval(i,2) + 1
+      end if
+    end do
+  end do
+  
+  ! Computing the number of active contacts
+  do i=1, ninter
+    contotal = contotal + theta_interval(i,2)
+  end do
+  
+  ! Normalizing
+  theta_interval(:,2) = theta_interval(:,2)/(contotal*interval)
+  
+  ! Opening the file
+  open(unit=126,file=nom,status='replace')
+  
+  ! Writing the heading 
+  write(126,*) '# Theta(Rad) ', '  Freq_norm  '
+  
+  ! Writing
+  do i=1, ninter
+    write(126,'(2(1X,E12.5))') theta_interval(i,1), theta_interval(i,2)
+  end do
+  
+  ! Writing the 3rd and 4th quadrants
+  do i=1, ninter
+    write(126,'(2(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,2)
+  end do
+  
+  close(126)
+  
+  print*, 'Write branch dir              ---> Ok!'
+  
+end subroutine ctc_dir_l
+
+!==============================================================================
 ! Contact forces lists for PDF and more
 !==============================================================================
 subroutine f_list
@@ -3125,7 +3282,6 @@ subroutine anisotropy_branch
   print*, 'Write Anisotropy Branch          ---> Ok!'
 end subroutine anisotropy_branch
 
-
 !==============================================================================
 ! Branch orientation
 !==============================================================================
@@ -3277,6 +3433,160 @@ subroutine branch_dir
   print*, 'Write Branch dir    ---> Ok!'
 
 end subroutine branch_dir
+
+!==============================================================================
+! Branch orientation on L
+!==============================================================================
+subroutine brc_dir_l
+
+  implicit none
+
+  integer                                      :: i, j, ninter, contotal, cd, an
+  real(kind=8)                                 :: interval, pro_n, pro_t
+  real(kind=8)                                 :: angcurr, maxint, minint
+  real(kind=8), dimension(3)                   :: nik, Lik, tik, tanik
+  real(kind=8), dimension(:,:), allocatable    :: theta_interval
+  character(len=26)                            :: file_name
+  logical                                      :: dir_ctcdir
+
+  ! Cleaning or creating the folder if necessary
+  if (first_over_all) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/BRDR_L', exist=dir_ctcdir)
+    if(dir_ctcdir) then
+      ! Cleaning
+      call system('rm ./POSTPRO/BRDR_L/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/BRDR_L')
+    end if
+  end if
+
+  ! The file name
+  file_name       =  './POSTPRO/BRDR_L/BD_L.    '
+
+  if (compteur_clout<10) then
+    WRITE(file_name(23:23),'(I1)')   compteur_clout
+  else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
+    WRITE(file_name(23:24),'(I2)')   compteur_clout
+  else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
+    WRITE(file_name(23:25),'(I3)')   compteur_clout
+  else if ( (compteur_clout>=1000).and. (compteur_clout<10000) ) then
+    WRITE(file_name(23:26),'(I4)')   compteur_clout
+  end if
+
+  ! Opening the file
+  open(unit=128,file=file_name,status='replace')
+
+  ! Number of intervals over pi
+  ninter = 36
+
+  ! Initializing variables
+  contotal = 0
+  interval = pi/ninter
+
+  ! Allocating the vector that will contain the contact direction and frequency
+  if (allocated(theta_interval)) deallocate(theta_interval)
+  allocate(theta_interval(ninter,4))
+
+  ! Computing the contact direction, initializing the frequency, and the total branch sum
+  do i=1, ninter
+    theta_interval(i,1) = (interval/2)*(2*i-1)
+    theta_interval(i,2) = 0
+    theta_interval(i,3) = 0
+    theta_interval(i,4) = 0
+  end do
+
+  ! Computing the frequency for each interval
+  do i=1, ninter
+    ! The width of the interval
+    minint = interval*(i - 1)
+    maxint = interval*i
+    do j=1,nb_ligneCONTACT_POLYG
+      cd = TAB_CONTACT_POLYG(j)%icdent
+      an = TAB_CONTACT_POLYG(j)%ianent
+      ! Only between discs
+      if(TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
+
+      ! Only active contacts
+      if(abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-8 .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-8) cycle
+
+      ! The branch vector
+      Lik(:) = TAB_POLYG(cd)%center(:)-TAB_POLYG(an)%center(:)
+
+      ! Not joining contacts in the periodic zones
+      !if (sqrt(Lik(1)**2 + Lik(2)**2) .gt. 3.*(TAB_POLYG(cd)%radius + TAB_POLYG(an)%radius)) cycle
+
+      ! The normal vector
+      nik(1) = Lik(1)/(Lik(1)**2 + Lik(2)**2)**0.5
+      nik(2) = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
+
+      ! The tangential vector - xz plane!
+      !tik = TAB_CONTACT(j)%t
+      !sik = TAB_CONTACT(j)%s
+      !tanik = sik*TAB_CONTACT(j)%rs + tik*TAB_CONTACT(j)%rt
+
+      ! unitary
+      !tanik = tanik/sqrt(tanik(1)**2 + tanik(2)**2 + tanik(3)**2)
+
+      ! Normal projection
+      pro_n = abs(Lik(1)*nik(1) + Lik(2)*nik(2))
+
+      ! The 1 and 2 quadrants only
+      ! Changing the vector direction if necessary
+      if(nik(2) .lt. 0) then
+        nik(1) = -nik(1)
+        nik(2) = -nik(2)
+      end if
+
+      tanik(1) = nik(2)
+      tanik(2) = -nik(1)
+
+      ! Tangential projection
+      pro_t = Lik(1)*tanik(1) + Lik(2)*tanik(2)
+
+      !if (pro_n .lt. 0.6*pro_t) cycle
+
+      ! Finding the current angle. Note the vector nik is unitary!
+      angcurr = acos(nik(1)/sqrt(nik(1)**2 + nik(2)**2))
+
+      ! Checking the interval
+      if(angcurr .lt. maxint .and. angcurr .ge. minint) then
+        theta_interval(i,2) = theta_interval(i,2) + 1
+        theta_interval(i,3) = theta_interval(i,3) + pro_n
+        theta_interval(i,4) = theta_interval(i,4) + pro_t
+      end if
+    end do
+  end do
+
+  ! Computing the number of active contacts
+  do i=1, ninter
+    contotal = contotal + theta_interval(i,2)
+  end do
+
+  ! The averages
+  theta_interval(:,3) = theta_interval(:,3)/(theta_interval(:,2)*2)
+  theta_interval(:,4) = theta_interval(:,4)/(theta_interval(:,2)*2)
+
+  ! Writing the heading
+  write(128,*) '# Theta(Rad) ', '    <ln>    ', '    <lt>    '
+
+  ! Writing
+  do i=1, ninter
+    write(128,'(3(1X,E12.5))') theta_interval(i,1), theta_interval(i,3), theta_interval(i,4)
+  end do
+
+  ! Writing the 3rd and 4th quadrants
+  do i=1, ninter
+    write(128,'(3(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,3), theta_interval(i,4)
+  end do
+
+  close(128)
+
+  print*, 'Write Branch dir L   ---> Ok!'
+
+end subroutine brc_dir_l
+
 
 !==============================================================================
 ! Contacts orientation
@@ -3448,6 +3758,155 @@ subroutine forces_dir
   print*, 'Write Forces dir    ---> Ok!'
 
 end subroutine forces_dir
+
+
+!==============================================================================
+! Forces orientation on Ls
+!==============================================================================
+subroutine frc_dir_l
+
+  implicit none
+
+  integer                                      :: i, j, ninter, contotal, cd, an
+  real(kind=8)                                 :: interval, pro_n, pro_t, Rnik, Rtik
+  real(kind=8)                                 :: angcurr, maxint, minint
+  real(kind=8), dimension(2)                   :: nik, Fik, tik, tanik, nik_c, tik_c, Lik
+  real(kind=8), dimension(:,:), allocatable    :: theta_interval
+  character(len=26)                            :: file_name
+  logical                                      :: dir_ctcdir
+
+  ! Cleaning or creating the folder if necessary
+  if (first_over_all) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/FRCD_L', exist=dir_ctcdir)
+    if(dir_ctcdir) then
+      ! Cleaning
+      call system('rm ./POSTPRO/FRCD_L/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/FRCD_L')
+    end if
+  end if
+
+  ! The file name
+  file_name       =  './POSTPRO/FRCD_L/FD_L.    '
+
+  if (compteur_clout<10) then
+    WRITE(file_name(23:23),'(I1)')   compteur_clout
+  else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
+    WRITE(file_name(23:24),'(I2)')   compteur_clout
+  else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
+    WRITE(file_name(23:25),'(I3)')   compteur_clout
+  else if ( (compteur_clout>=1000).and. (compteur_clout<10000) ) then
+    WRITE(file_name(23:26),'(I4)')   compteur_clout
+  end if
+
+  ! Opening the file
+  open(unit=129,file=file_name,status='replace')
+
+  ! Number of intervals over pi
+  ninter = 36
+
+  ! Initializing variables
+  contotal = 0
+  interval = pi/ninter
+
+  ! Allocating the vector that will contain the contact direction and frequency
+  if (allocated(theta_interval)) deallocate(theta_interval)
+  allocate(theta_interval(ninter,4))
+
+  ! Computing the contact direction, initializing the frequency, and the total force sum
+  do i=1, ninter
+    theta_interval(i,1) = (interval/2)*(2*i-1)
+    theta_interval(i,2) = 0
+    theta_interval(i,3) = 0
+    theta_interval(i,4) = 0
+  end do
+
+  ! Computing the frequency for each interval
+  do i=1, ninter
+    ! The width of the interval
+    minint = interval*(i - 1)
+    maxint = interval*i
+    do j=1,nb_ligneCONTACT_POLYG
+      cd = TAB_CONTACT_POLYG(j)%icdent
+      an = TAB_CONTACT_POLYG(j)%ianent
+      ! Only between discs
+      if(TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
+
+      ! Only active contacts
+      if(abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-8 .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-9) cycle
+
+      Rnik = TAB_CONTACT_POLYG(j)%rn
+      Rtik = TAB_CONTACT_POLYG(j)%rt
+
+      ! The normal vector
+      nik_c(1) = TAB_CONTACT_POLYG(j)%n(1)
+      nik_c(2) = TAB_CONTACT_POLYG(j)%n(2)
+      tik_c(1) = TAB_CONTACT_POLYG(j)%t(1)
+      tik_c(2) = TAB_CONTACT_POLYG(j)%t(2)
+
+      ! The force vector
+      Fik(1:2) = (Rnik*nik_c(1:2)+Rtik*tik_c(1:2))
+
+      ! The branch
+      Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
+      Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
+  
+      ! The new frame on L
+      nik(1) = Lik(1)/(Lik(1)**2 + Lik(2)**2)**0.5
+      nik(2) = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
+      tik(1) = nik(2)
+      tik(2) = -nik(1)
+
+      ! Normal projection
+      !pro_n = abs(Fik(1)*nik(1) + Fik(2)*nik(2))
+      pro_n = Fik(1)*nik(1) + Fik(2)*nik(2)
+
+      ! Tangential projection
+      pro_t = Fik(1)*tik(1) + Fik(2)*tik(2)
+
+      ! The 1 and 2 quadrants only
+      ! Changing the vector direction if necessary
+      if(nik(2) .lt. 0) then
+        nik(1) = -nik(1)
+        nik(2) = -nik(2)
+      end if
+
+      ! Finding the current angle. Note the vector nik is already unitary!
+      angcurr = acos(nik(1)/sqrt(nik(1)**2 + nik(2)**2))
+
+      ! Checking the interval
+      if(angcurr .lt. maxint .and. angcurr .ge. minint) then
+        theta_interval(i,2) = theta_interval(i,2) + 1
+        theta_interval(i,3) = theta_interval(i,3) + pro_n
+        theta_interval(i,4) = theta_interval(i,4) + pro_t
+      end if
+    end do
+  end do
+
+  ! The averages
+  theta_interval(:,3) = theta_interval(:,3)/(theta_interval(:,2)*2)
+  theta_interval(:,4) = theta_interval(:,4)/(theta_interval(:,2)*2)
+
+  ! Writing the heading
+  write(129,*) '# Theta(Rad) ', '    <fn>    ', '    <ft>    '
+
+  ! Writing
+  do i=1, ninter
+    write(129,'(3(1X,E12.5))') theta_interval(i,1), theta_interval(i,3), theta_interval(i,4)
+  end do
+
+  ! Writing the 3rd and 4th quadrants
+  do i=1, ninter
+    write(129,'(3(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,3), theta_interval(i,4)
+  end do
+
+  close(129)
+
+  print*, 'Write Forces dir    ---> Ok!'
+
+end subroutine frc_dir_l
 
 !==============================================================================
 ! Computing the probability of N number of contacts 
@@ -3838,13 +4297,13 @@ subroutine signed_anisotropy_l
   real(kind=8),dimension(2,2)                         ::  Fabric,HN,HT,LN,LT,Matrice, Moment
   real(kind=8),dimension(:),allocatable               ::  tab_alpha,tab_FN,tab_FT,tab_LN,tab_LT,tab_C,tab_nx
 
-  real(kind=8)                             :: S1,S2
-  real(kind=8),dimension(2,2)              :: localframe
-  real(kind=8),dimension(2)                :: wr,wi
-  integer                                  :: ierror,matz,lda
+  !real(kind=8)                             :: S1,S2
+  !real(kind=8),dimension(2,2)              :: localframe
+  !real(kind=8),dimension(2)                :: wr,wi
+  !integer                                  :: ierror,matz,lda
 
 
-  Nsect_orientation = 18
+  Nsect_orientation = 36
   allocate(tab_alpha(Nsect_orientation))
   tab_alpha = 0
   sect = pi / real(Nsect_orientation,8)
@@ -3891,7 +4350,7 @@ subroutine signed_anisotropy_l
     an      = TAB_CONTACT_POLYG(i)%ianent
 
     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-9) cycle
+    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-8) cycle
 
     nik_c(1) = TAB_CONTACT_POLYG(i)%n(1)
     nik_c(2) = TAB_CONTACT_POLYG(i)%n(2)
@@ -3906,12 +4365,14 @@ subroutine signed_anisotropy_l
     ! The new frame on L
     nik(1) = Lik(1)/(Lik(1)**2 + Lik(2)**2)**0.5
     nik(2) = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
+  
     tik(1) = nik(2)
     tik(2) = -nik(1)
 
     ! Building the stress tensor (on the contact frame)
-    Fik(1) = (Rnik*nik_c(1)+Rtik*tik_c(1))
-    Fik(2) = (Rnik*nik_c(2)+Rtik*tik_c(2))
+    Fik(1:2) = (Rnik*nik_c(1:2)+Rtik*tik_c(1:2))
+    !Fik(1) = (Rnik*nik_c(1)+Rtik*tik_c(1))
+    !Fik(2) = (Rnik*nik_c(2)+Rtik*tik_c(2))
     
     Moment(1,1:2) = Fik(1)*Lik(1:2) + Moment(1,1:2)
     Moment(2,1:2) = Fik(2)*Lik(1:2) + Moment(2,1:2)
@@ -3955,7 +4416,7 @@ subroutine signed_anisotropy_l
     an      = TAB_CONTACT_POLYG(j)%ianent
 
     if (TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
-    if (abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-9) cycle
+    if (abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-8) cycle
 
     nik_c(1) = TAB_CONTACT_POLYG(j)%n(1)
     nik_c(2) = TAB_CONTACT_POLYG(j)%n(2)
@@ -3974,8 +4435,9 @@ subroutine signed_anisotropy_l
     tik(2) = -nik(1)
 
     ! Building the stress tensor (on the contact frame)
-    Fik(1) = (Rnik*nik_c(1)+Rtik*tik_c(1))
-    Fik(2) = (Rnik*nik_c(2)+Rtik*tik_c(2))
+    Fik(1:2) = (Rnik*nik_c(1:2)+Rtik*tik_c(1:2))
+    !Fik(1) = (Rnik*nik_c(1)+Rtik*tik_c(1))
+    !Fik(2) = (Rnik*nik_c(2)+Rtik*tik_c(2))
 
     !Force_N  = TAB_CONTACT_POLYG(j)%rn !TAB_CONTACT_POLYG(i)%F(1)*nik(1) + TAB_CONTACT_POLYG(i)%F(2)*nik(2)
     !Force_T  = TAB_CONTACT_POLYG(j)%rt !TAB_CONTACT_POLYG(i)%F(1)*tik(1) + TAB_CONTACT_POLYG(i)%F(2)*tik(2)
@@ -3988,7 +4450,8 @@ subroutine signed_anisotropy_l
     Norme_LT = ( Lik(1)*tik(1) + Lik(2)*tik(2) )
 
     if (Norme_LT<0.0000001) Norme_LT = 0
-    if ( nik(2)<0 ) then
+
+    if ( nik(2) .lt. 0 ) then
       nik(1) = -nik(1)
       nik(2) = -nik(2)
     end If
@@ -4006,7 +4469,7 @@ subroutine signed_anisotropy_l
         tab_nx(i)    = tab_nx(i) + alpha
         exit
       end if
-      else if ((i>1).and.(i<Nsect_orientation)) then
+    else if ((i>1).and.(i<Nsect_orientation)) then
       if ((alpha>=tab_alpha(i-1)).and.(alpha<tab_alpha(i))) then
         tab_C(i)     = tab_C(i)  + 1.0
         tab_FN(i)    = tab_FN(i) + Force_N
@@ -4016,7 +4479,7 @@ subroutine signed_anisotropy_l
         tab_nx(i)    = tab_nx(i) + alpha
         exit
       end if
-      else if (i==Nsect_orientation) then
+    else if (i==Nsect_orientation) then
         if ((alpha<=tab_alpha(i)).and.(alpha>=tab_alpha(i-1))) then
           tab_C(i)     = tab_C(i)  + 1.0
           tab_FN(i)    = tab_FN(i) + Force_N
@@ -4077,7 +4540,7 @@ subroutine signed_anisotropy_l
     an = TAB_CONTACT_POLYG(i)%ianent
 
     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-9) cycle
+    if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-8) cycle
 
     !nik_c(1) = TAB_CONTACT_POLYG(i)%n(1)
     !nik_c(2) = TAB_CONTACT_POLYG(i)%n(2)

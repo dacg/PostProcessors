@@ -1,12 +1,12 @@
 ############################################################
-########### POSTPROCESSOR FOR ASSEMBLIES OF DKDK ###########
+###########  POSTPROCESSOR FOR ASSEMBLIES OF 2D  ###########
 ############################################################
 
 # Importing functions
 import sys, glob
 
 # Local functions
-from functions_dkdk import *
+from functions_2D import *
 
 ############################################################
 # Setting up the postprocessor
@@ -17,10 +17,14 @@ h_frame = 'all'                 # Options: 'all': for all frames in the OUTBOX.
                                 #         [initial_frame, last_frame]
 
 # Defining the parameters to compute
-c_wall_position = True
-c_wall_forces   = True
-c_compacity     = True
-c_shape_ratio   = True
+c_walls_position = False #True
+c_walls_forces   = False #True
+c_compacity      = False #True
+c_qoverp         = False #True
+c_c_anisotropy   = False #True
+c_f_anisotropy   = True #True
+c_b_anisotropy   = True #True
+
 
 ############################################################
 # The postprocessor
@@ -39,7 +43,7 @@ else:
   last_frame = h_frame[1]
 #
 
-print ('Analysing frames: ', init_frame, ' to ', last_frame)
+print ('Frames to analyze: ', init_frame, ' to ', last_frame)
 
 # One time functions
 # Initializing bodies 
@@ -48,15 +52,21 @@ bodies = init_bodies()
 # Looping the desired frames
 for ii in range(init_frame,last_frame,1):
 
+  # Printing info on this step
+  print ('################################')
+  print ('Analyzing frame: ', str(ii))
+
   # Reading the historic file. This allocates contacts and updates variables in bodies for current configuration
   bodies, contacts = read_historic(ii,bodies)
 
-  print (bodies[0].veloc)
-
   # Computing the parameters that are needed
-  #if (c_wall_position): wall_position(ii,last_frame,bodies_current,contacts)
-  #if (c_wall_forces): wall_forces(ii,last_frame,bodies_current,contacts)
-  #if (c_compacity): compacity(ii,last_frame,bodies_current,contacts)
+  if (c_walls_position): walls_position(ii,init_frame,last_frame,bodies,contacts)
+  if (c_walls_forces)  : walls_forces(ii, init_frame,last_frame,bodies,contacts)
+  if (c_compacity)     : compacity(ii,init_frame,last_frame,bodies,contacts)
+  if (c_qoverp)        : qoverp(ii,init_frame,last_frame,bodies,contacts)
+  if (c_c_anisotropy)  : c_anisotropy(ii,init_frame,last_frame,bodies,contacts)
+  if (c_f_anisotropy)  : f_anisotropy(ii,init_frame,last_frame,bodies,contacts)
+  if (c_b_anisotropy)  : b_anisotropy(ii,init_frame,last_frame,bodies,contacts)
   #
 
 #
