@@ -8,82 +8,55 @@ program post2D_rigid
 implicit none
 
 ! Types of bodies
-type  ::  T_DISK
+type  ::  T_BODY
+  ! General info for every type of body
   integer                                  ::  id
-  real(kind=8)                             ::  radius, area, rotation
+  real(kind=8)                             ::  radius, area, rot
   real(kind=8),dimension(2)                ::  center_ref, center
   real(kind=8),dimension(3)                ::  veloc
-  character(len=5)                         ::  shape='polyg'
-end type T_DISK
+  character(len=5)                         ::  shape ! It can be: 'diskx', 'polyx', 'clusx'
 
-type  ::  T_PTX
-  integer                                  ::  id
-  real(kind=8)                             ::  radius, area, rotation
-  real(kind=8),dimension(2)                ::  center_ref, center
-  real(kind=8),dimension(3)                ::  veloc
-  character(len=5)                         ::  shape='polyg'
-end type T_PTX
+  ! Info for polyg or clusters
+  integer                                  ::  n_vertex
+  real(kind=8)                             ::  radius_c1, radius_c2
+  real(kind=8),dimension(2)                ::  center_ref_c1, center_ref_c2
+  real(kind=8),dimension(2)                ::  center_c1, center_c2
+  real(kind=8),allocatable,dimension(:,:)  ::  vertex, vertex_ref
 
-type  ::  T_POLYG
-  integer                                  ::  id, nb_vertex
-  real(kind=8)                             ::  radius, area 
-  real(kind=8),dimension(2)                ::  center_ref, center
-  real(kind=8),dimension(3)                ::  veloc
-  real(kind=8),allocatable,dimension(:,:)  ::  vertex,vertex_ref
-  character(len=5)                         ::  shape='polyg'
-end type T_POLYG
+  ! Info for walls
+  real(kind=8)                             ::  ax1, ax2
+end type T_BODY
 
-type  ::  T_CLUSTER
-  integer                                  ::  id, nb_vertex
-  real(kind=8)                             ::  radius, area 
-  real(kind=8),dimension(2)                ::  center_ref, center
-  real(kind=8),dimension(3)                ::  veloc
-  real(kind=8),allocatable,dimension(:,:)  ::  vertex,vertex_ref
-  character(len=7)                         ::  shape='cluster'
-end type T_CLUSTER
-
-type  ::  T_WALL
-  integer                                  ::  id
-  real(kind=8)                             ::  radius, area, ax1,ax2
-  real(kind=8),dimension(3)                ::  center_ref, center
-  real(kind=8),dimension(3)                ::  veloc
-  real(kind=8),allocatable,dimension(:,:)  ::  vertex,vertex_ref
-  character(len=4)                         ::  shape='wall'
-end type T_WALL
 
 type  ::  T_CONTACT
-   integer                                  ::  cd, an, cdver, sect, adj
-   integer                                  ::  type
-   real(kind=8),dimension(3)                ::  n
-   real(kind=8),dimension(3)                ::  t
-   real(kind=8),dimension(3)                ::  coor_ctc
+   integer                                  ::  id, cd, an, cdver, sect, iadj
+   integer                                  ::  n_interact, l_ver, l_seg
+   real(kind=8),dimension(2)                ::  n_frame
+   real(kind=8),dimension(2)                ::  t_frame
+   real(kind=8),dimension(2)                ::  coor_ctc
    real(kind=8)                             ::  rn,rt
    real(kind=8)                             ::  vn,vt
    real(kind=8)                             ::  gap0, gap, cd_len, tang_disp
-   character(len=5)                         ::  nature, status, law
+   character(len=5)                         ::  nature, status, i_law
 end type T_CONTACT
 
-type(T_DISK),allocatable,dimension(:)       ::  TAB_DISK
-type(T_POLYG),allocatable,dimension(:)      ::  TAB_POLYG
+type(T_BODY),allocatable,dimension(:)       ::  TAB_BODIES
 type(T_CONTACT),allocatable,dimension(:)    ::  TAB_CONTACT_RAW
 type(T_CONTACT),allocatable,dimension(:)    ::  TAB_CONTACT
 
 !Definitions
 !================================================
-integer                                     ::  n_walls=0, n_particles=0, n_r_grain=0, n_ptx=0
-integer                                     ::  ini_frame, last_grame 
-integer                                     ::  compteur_clout=0,all_step=0
-logical                                     ::  fin_post=.false.
-logical                                     ::  first_over_all = .true.
-integer                                     ::  n_dkdk, n_plpl, n_dkjc, n_pljc, n_contacts_raw 
-integer                                     ::  n_double, n_contacts
-integer                                     ::  except
+integer                                     ::  n_wall=0, n_bodies=0
+integer                                     ::  n_disk=0, n_polyg=0, n_cluster=0, n_pt2x=0
+integer                                     ::  init_frame, last_frame 
+integer                                     ::  n_dkdk=0, n_plpl=0, n_dkjc=0, n_pljc=0, n_dkpl
+integer                                     ::  n_simple=0,n_double=0, n_contacts=0, n_contacts_raw=0
+integer                                     ::  except, ii, step
 real(kind=8)                                ::  time
 
 ! Box size
 !================================================
-real(kind=8)                               ::  height, width
-
+real(kind=8)                               ::  box_height, box_width
 
 ! Functions list
 !================================================
@@ -112,7 +85,7 @@ print*,'-------------------------------------------'
 print*,'!                                         !'
 print*,'!            Post-processing 2D           !'
 print*,'!         from Emilien Azema Code         !'
-print*,'!                 David C +               !'
+print*,'!           David C + _______             !'
 print*,'-------------------------------------------'
 print*,'Flags to be computed: '
 ! Opening the file
@@ -128,6 +101,20 @@ do
     close(1)
     ! We break the loop
     exit
+  end if
+
+  if (command=='FRAMES                       :') then
+    read(1,*) command
+    ! Checking the range of frames to be analyzed
+    if (command(1:3) == 'all') then
+      call number_files()
+    else 
+      ! Converting string to integer
+      read(command,*) init_frame
+      ! Reading the next integer
+      read(1,*) last_frame 
+    end if 
+    cycle
   end if
 
   if (command=='WALLS POSITION               :') then
@@ -157,16 +144,6 @@ do
     ! Uses port 104
     cycle
   end if
-  
-  !if (command=='VLOC_DOF_BODIES              :') then
-  !  read(1,*) n_walls
-  !  read(1,*) n_particles
-  !  if (c_multi_part_frac == 1) then
-  !    read(1,*) n_r_grain
-  !    read(1,*) n_pt_points
-  !  end if 
-  !  cycle
-  !end if
   
   ! if (command=='COORDINATION                 :') then
   !   c__coordination=1
@@ -323,34 +300,34 @@ do
   ! end if
 end do
 
-!==============================================================================
 ! Initializing bodies
-!==============================================================================
-call read_bodies()
+call read_bodies
 
-!==============================================================================
-! !Appel des differente ressources lues dans le fichier de commande
-! !==============================================================================
-!   do
-    
-!     if (copy_input .and. first_over_all) then
-!       call system('cp DATBOX/DOF.INI OUTBOX/DOF.OUT.0')
-!       call system('cp DATBOX/Vloc_Rloc.INI OUTBOX/Vloc_Rloc.OUT.0')
-!     endif
-    
-!     call read_Vloc_dof_bodies
-    
-!     call test_position_contact
-    
-!     ! Calling the Subroutines
+! Analysing the frames
+do ii=init_frame, last_frame
+
+  ! General info
+  print*, 'Analyzing frame: ', ii
+  
+  ! Updating bodies
+  call update_bodies(ii)
+
+  ! Computing the size of the box
+  call box_size
+
+  ! Reading the contact information
+  call read_contacts(ii)
+
+  ! Calling subroutines
+  if (c_walls_pos              == 1)  call walls_pos(ii,init_frame,last_frame)
+  if (c_walls_frc              == 1)  call walls_frc(ii,init_frame,last_frame)
+  if (c_compacity              == 1)  call compacity(ii,init_frame,last_frame)
+  !if (c_qoverp                 == 1)  call qoverp(ii,init_frame,last_frame)
+
 !     if (calcul_coordination         == 1)  call nb_coordination
-!     if (walls_position              == 1)  call wallsposition
-!     if (walls_f                     == 1)  call walls_force
 !     if (calcul_granulo              == 1)  call granulometry
 !     if (contact_dir                 == 1)  call contact_direction
 !     if (calcul_vitesse_moyenne      == 1)  call vitesse_moyenne
-!     if (calcul_compacity            == 1)  call compacity
-!     if (calcul_qoverp               == 1)  call qoverp
 !     if (calcul_anisotropy_contact   == 1)  call anisotropy_contact
 !     if (calcul_anisotropy_force     == 1)  call anisotropy_force
 !     if (calcul_anisotropy_branch    == 1)  call anisotropy_branch
@@ -369,612 +346,665 @@ call read_bodies()
 !     if (c_ctc_dir_l                 == 1)  call ctc_dir_l
 !     if (c_brc_dir_l                 == 1)  call brc_dir_l
 !     if (c_frc_dir_l                 == 1)  call frc_dir_l
+end do
 
-!     ! One step subroutines 
-!     if (first_over_all) then
-!       if (c_avg_shape_ratio           == 1)  call avg_shape_ratio
-!     end if
+!==============================================================================
+!==============================================================================
+! The functions
+contains
 
-!     if (fin_post) then
-!       call close_all
-!       print*,'--> End of post-processing <--'
-!       exit
-!     end if
-!     first_over_all = .false.
-!   end do
+!==============================================================================
+! Function that counts the number of files to be analized in case of 'all'
+!==============================================================================
+subroutine number_files
 
-! !==============================================================================
-! ! Subroutines
-! !==============================================================================
+  implicit none
 
-!  contains
+  character(len=23)             :: clout_DOF
+  logical                       :: exist
+  integer                       :: ind
 
-! !==============================================================================
-! ! Lecture des donnees
-! !==============================================================================
-! SUBROUTINE read_Vloc_dof_bodies
+
+  clout_DOF    = './OUTBOX/DOF.OUT.     '
   
-!   implicit none
+  ! Setting the index of the output files
+  ind = 0
   
-!   integer                       ::  i,j,k,err,num_part,nb_vertex,gen, n_groups
-!   character(len=22)             ::  clout_DOF
-!   character(len=28)             ::  clout_Vloc
-!   character(len=20)             ::  clout_Bodies
-!   character(len=5)              ::  status, i_law
-!   character(len=6)              ::  text
-!   character(len=13)             ::  text2
-!   real(kind=8)                  ::  center1,center2,center3
-!   real(kind=8)                  ::  vertex_coor1,vertex_coor2,vertex_coor3
-!   real(kind=8),dimension(3)     ::  g_gravity
-!   real(kind=8)                  ::  coor1,coor2,coor3
-!   real(kind=8)                  ::  Vx,Vy,Vr
-!   real(kind=8)                  ::  radius,ax1,ax2
-!   integer                       ::  icdent,ianent,cpt_type, l_stat_p,l_ver, l_seg, l_adj
-!   real(kind=8)                  ::  n1,n2,n3
-!   real(kind=8)                  ::  rn,rt,rs,rn_temp,rt_temp,rs_temp, gap_temp
-!   real(kind=8)                  ::  vln,vlt,vls
-!   real(kind=8)                  ::  coor_ctc1,coor_ctc2,coor_ctc3
-!   real(kind=8)                  ::  coor_ctc1_temp,coor_ctc2_temp,coor_ctc3_temp
-!   real(kind=8)                  ::  gap_c, gap0, cd_len, tang_disp
-!   integer                       ::  n_simple,n_double
-!   logical                       ::  first_double=.true.
-  
-!   clout_DOF    = './OUTBOX/DOF.OUT.    '
-!   clout_Vloc   = './OUTBOX/Vloc_Rloc.OUT.    '
-!   clout_Bodies = './OUTBOX/BODIES.OUT'
-  
-!   ! Setting the index of the output files
-!   compteur_clout = compteur_clout+1
-  
-!   if (copy_input .and. first_over_all) then
-!     compteur_clout = compteur_clout - 1
-!   endif
-  
-!   if (compteur_clout<10) then
-!     WRITE(clout_DOF(18:19),'(I1)')  compteur_clout
-!     WRITE(clout_Vloc(24:25),'(I1)')  compteur_clout
-!   else if ((compteur_clout>=10) .and. (compteur_clout<100)) then
-!     WRITE(clout_DOF(18:20),'(I2)')   compteur_clout
-!     WRITE(clout_Vloc(24:26),'(I2)')  compteur_clout
-!   else if ((compteur_clout>=100) .and. (compteur_clout<1000)) then
-!     WRITE(clout_DOF(18:21),'(I3)')   compteur_clout
-!     WRITE(clout_Vloc(24:27),'(I3)')  compteur_clout
-!   else if ((compteur_clout>=1000) .and. (compteur_clout<10000)) then
-!     WRITE(clout_DOF(18:22),'(I4)')   compteur_clout
-!     WRITE(clout_Vloc(24:28),'(I4)')  compteur_clout
-!   end if
-  
-!   ! Opening the BODIES.OUT file for its reading
-!   if (compteur_clout == 1) then
-!     open(unit=2,file=clout_Bodies, iostat=err ,status='old')
-!     if (err/=0) then
-!       fin_post=.true.
-!     endif
-!   elseif (compteur_clout == 0 .and. copy_input) then
-!     open(unit=2,file=clout_Bodies, iostat=err ,status='old')
-!     if (err/=0) then
-!       fin_post=.true.
-!     endif
-!   endif
-  
-!   if (first_bodies) then
-!     allocate(TAB_POLYG(n_particles))
-!     allocate(TAB_PLAN(n_walls))
-!     allocate(TAB_POINT(n_pt_points))
-!   endif
-  
-!   ! Counter
-!   i=0
-  
-!   ! Reading the BODIES.OUT
-!   if((fin_post .neqv. .true.) .and. (first_bodies .eqv. .true.) ) then
-!     print*,'--->',clout_Bodies
-!     do
-!       read(2,'(A6)') text
-!       if (text == '$bdyty') then
-!         i = i +1
-!         if (i<n_particles+1) then
-!           TAB_POLYG(i)%num=i
-!           read(2,*) 
-!           read(2,*) 
-!           read(2,'(35X,D14.7)') radius
-!           read(2,*)
-          
-!           TAB_POLYG(i)%behav = 'PLEXx'
-!           read(2,'(29X, 3(5x,D14.7,2X))') center1,center2,center3
-!           TAB_POLYG(i)%center_ref(1)=center1
-!           TAB_POLYG(i)%center_ref(2)=center2
-!           TAB_POLYG(i)%center_ref(3)=center3
-!           read(2,*)
-!           read(2,'(40X,i6,9X,D14.7)') nb_vertex
-!           TAB_POLYG(i)%radius=radius
-!           TAB_POLYG(i)%nb_vertex=nb_vertex
-          
-!           ! Allocating the space for the vertices coordinates
-!           allocate(TAB_POLYG(i)%vertex_ref(3,nb_vertex))
-!           allocate(TAB_POLYG(i)%vertex(3,nb_vertex))
-          
-!           ! Reading the vertices coordinates
-!           do j=1,nb_vertex
-!             read(2,'(29X, 2(5x,D14.7,2X))') vertex_coor1,vertex_coor2
-!             TAB_POLYG(i)%vertex_ref(1,j) = vertex_coor1
-!             TAB_POLYG(i)%vertex_ref(2,j) = vertex_coor2
-!             TAB_POLYG(i)%vertex_ref(3,j) = 0
-!             g_gravity(1) = g_gravity(1) + vertex_coor1
-!             g_gravity(2) = g_gravity(2) + vertex_coor2
-!             g_gravity(3) = g_gravity(3) + 0
-!           end do
-!           read(2,*)
-!           read(2,*)
-          
-!           ! Computing the grain area
-!           TAB_POLYG(i)%Area = 0.D0
-!           do j=1,nb_vertex-2
-!             TAB_POLYG(i)%Area = TAB_POLYG(i)%Area + &
-!                        0.5d0*(((TAB_POLYG(i)%vertex_ref(1,j+1) - TAB_POLYG(i)%vertex_ref(1,1)) &
-!                               *(TAB_POLYG(i)%vertex_ref(2,j+2) - TAB_POLYG(i)%vertex_ref(2,1))) &
-!                              -((TAB_POLYG(i)%vertex_ref(2,j+1) - TAB_POLYG(i)%vertex_ref(2,1)) &
-!                               *(TAB_POLYG(i)%vertex_ref(1,j+2) - TAB_POLYG(i)%vertex_ref(1,1))))
-!           enddo
-!         else if (i<n_particles + n_walls + 1) then
-!           TAB_PLAN(i-n_particles)%num=i
-!           read(2,*)
-!           read(2,*)
-!           read(2,*)
-!           read(2,*)
-!           read(2,'(29X, 3(5x,D14.7,2X))') center1,center2,center3
-!           TAB_PLAN(i-n_particles)%center_ref(1)=center1
-!           TAB_PLAN(i-n_particles)%center_ref(2)=center2
-!           TAB_PLAN(i-n_particles)%center_ref(3)=center3
-!           read(2,*)
-!           read(2,'(29X, 2(5x,D14.7,2X))') ax1,ax2
-!           TAB_PLAN(i-n_particles)%ax1=ax1
-!           TAB_PLAN(i-n_particles)%ax2=ax2
-!           TAB_PLAN(i-n_particles)%center(:)=0.D0
-!           TAB_PLAN(i-n_particles)%behav = 'WALL_'
-          
-!           ! Similar to poly, i'm going to create vertices (8 vertices in each wall)
-!           allocate(TAB_PLAN(i-n_particles)%vertex_ref(3,4))
-!           allocate(TAB_PLAN(i-n_particles)%vertex(3,4))
-          
-!           ! Vertices
-!           TAB_PLAN(i-n_particles)%vertex_ref(1,1) =  ax1
-!           TAB_PLAN(i-n_particles)%vertex_ref(2,1) =  ax2
-!           TAB_PLAN(i-n_particles)%vertex_ref(3,1) =  0.D0
-          
-!           TAB_PLAN(i-n_particles)%vertex_ref(1,2) = (- ax1)
-!           TAB_PLAN(i-n_particles)%vertex_ref(2,2) =  ax2
-!           TAB_PLAN(i-n_particles)%vertex_ref(3,2) =  0.D0
-          
-!           TAB_PLAN(i-n_particles)%vertex_ref(1,3) = (- ax1)
-!           TAB_PLAN(i-n_particles)%vertex_ref(2,3) = (- ax2)
-!           TAB_PLAN(i-n_particles)%vertex_ref(3,3) =  0.D0
-          
-!           TAB_PLAN(i-n_particles)%vertex_ref(1,4) =  ax1
-!           TAB_PLAN(i-n_particles)%vertex_ref(2,4) = (- ax2)
-!           TAB_PLAN(i-n_particles)%vertex_ref(3,4) =  0.D0
-          
-!         else 
-!           TAB_POINT(i-n_particles-n_walls)%num=i
-!           read(2,*) 
-!           read(2,*) 
-!           read(2,'(35X,D14.7)') radius
-!           read(2,*)
-          
-!           TAB_POINT(i-n_particles-n_walls)%behav = 'PLEXx'
-!           read(2,'(29X, 3(5x,D14.7,2X))') center1,center2,center3
-!           TAB_POINT(i-n_particles-n_walls)%center_ref(1)=center1
-!           TAB_POINT(i-n_particles-n_walls)%center_ref(2)=center2
-!           TAB_POINT(i-n_particles-n_walls)%center_ref(3)=center3
-!         end if
-        
-!         if (i==n_particles+n_walls+n_pt_points) exit
-!       end if
-      
-!       first_bodies = .false.
-!     end do
-!   end if
-!   close(2)
-  
-!   ! Reading the DOF.OUT.#
-!   open(unit=5,file=clout_DOF,iostat=err,status='old')
-!   if (err/=0) then
-!     fin_post=.true.
-!   else
-!     fin_post=.false.
-!     i = 0
-!     read(5,*)
-!     read(5,*)
-!     read(5,*)
-!     read(5,'(7X,i8,19X,D14.7)') step,time
-!     print*,'--->',clout_DOF
-!     do
-!       read(5,'(A6)') text
-!       if (text == '$bdyty') then
-!         i = i+1
-!         read(5,'(6X,i9)') num_part
-        
-!         if (i<n_particles+1) then
-!           read(5,*)
-!           read(5,'(29X, 3(5x,D14.7,2X))') coor1,coor2,coor3
-!           read(5,'(29X, 3(5x,D14.7,2X))') Vx,Vy,Vr
-          
-!           ! Appling the relative displacement
-!           TAB_POLYG(i)%center(1)=coor1+TAB_POLYG(i)%center_ref(1)
-!           TAB_POLYG(i)%center(2)=coor2+TAB_POLYG(i)%center_ref(2)
-          
-!           ! The third component is a rotation not a displacement
-!           !TAB_POLYG(i)%center(3)=coor3+TAB_POLYG(i)%center_ref(3)
-          
-!           ! Applying the relative rotation 
-!           do j=1,TAB_POLYG(i)%nb_vertex
-!             TAB_POLYG(i)%vertex(1,j) = TAB_POLYG(i)%vertex_ref(1,j) * cos(coor3) - &
-!                                        TAB_POLYG(i)%vertex_ref(2,j) * sin(coor3) + &
-!                                        TAB_POLYG(i)%center(1)
-!             TAB_POLYG(i)%vertex(2,j) = TAB_POLYG(i)%vertex_ref(1,j) * sin(coor3) + &
-!                                        TAB_POLYG(i)%vertex_ref(2,j) * cos(coor3) + &
-!                                        TAB_POLYG(i)%center(2)
-!             ! Initializing the third component (it's necessary for vtk)
-!             TAB_POLYG(i)%vertex(3,j) = 0.D0
-!           end do
-          
-!           TAB_POLYG(i)%V(1) = Vx
-!           TAB_POLYG(i)%V(2) = Vy
-!           TAB_POLYG(i)%V(3) = Vr
-          
-!         else if (i<n_particles+n_walls+1) then
-!           read(5,*)
-!           read(5,'(29X, 3(5x,D14.7,2X))') coor1,coor2,coor3
-!           read(5,'(29X, 3(5x,D14.7,2X))') Vx,Vy,Vr
-!           TAB_PLAN(i-n_particles)%center(1)=coor1+TAB_PLAN(i-n_particles)%center_ref(1)
-!           TAB_PLAN(i-n_particles)%center(2)=coor2+TAB_PLAN(i-n_particles)%center_ref(2)
-          
-!           ! The third componennt is a rotation not a displacement CHECK THIS
-!           !TAB_PLAN(i-n_particles)%center(3)=coor3+TAB_PLAN(i-n_particles)%center_ref(3)
-!           TAB_PLAN(i-n_particles)%V(1) = Vx
-!           TAB_PLAN(i-n_particles)%V(2) = Vy
-!           TAB_PLAN(i-n_particles)%V(3) = Vr
-          
-!           ! Applying the relative rotation
-!           do j=1, 4
-!             TAB_PLAN(i-n_particles)%vertex(1,j) =  TAB_PLAN(i-n_particles)%vertex_ref(1,j) * cos(coor3) - &
-!                                                    TAB_PLAN(i-n_particles)%vertex_ref(2,j) * sin(coor3) + &
-!                                                    TAB_PLAN(i-n_particles)%center(1)
-!             TAB_PLAN(i-n_particles)%vertex(2,j) =  TAB_PLAN(i-n_particles)%vertex_ref(1,j) * sin(coor3) + &
-!                                                    TAB_PLAN(i-n_particles)%vertex_ref(2,j) * cos(coor3) + &
-!                                                    TAB_PLAN(i-n_particles)%center(2)
-!             ! Initializing the third component (it's necessary for vtk)
-!             TAB_PLAN(i-n_particles)%vertex(3,j) = 0.D0
-!           end do
-!         else
-!           read(5,*)
-!           read(5,'(29X, 3(5x,D14.7,2X))') coor1,coor2,coor3
-!           read(5,'(29X, 3(5x,D14.7,2X))') Vx,Vy,Vr
-!           TAB_POINT(i-n_particles-n_walls)%center(1)=coor1+TAB_POINT(i-n_particles-n_walls)%center_ref(1)
-!           TAB_POINT(i-n_particles-n_walls)%center(2)=coor2+TAB_POINT(i-n_particles-n_walls)%center_ref(2)
-!           TAB_POINT(i-n_particles-n_walls)%V(1) = Vx
-!           TAB_POINT(i-n_particles-n_walls)%V(2) = Vy
-!           TAB_POINT(i-n_particles-n_walls)%V(3) = Vr
-!         end if
-!       end if
-      
-!       if (i==n_particles+n_walls+n_pt_points) exit
-!     end do
-!   end if
-  
-!   N_PLJCx = 0
-!   N_PLPLx = 0
-!   N_PTPT2 = 0
-  
-!   ! Reading the Vloc_Rloc.OUT.#
-!   ! This is a pre-reading for counting the number of contacts
-!   open(unit=4,file=clout_Vloc,iostat=err,status='old')
-  
-!   if (err/=0) then
-!     ! Void
-!   else
-!     print*,'--->',clout_Vloc
-!     read(4,*) 
-!     read(4,*) 
-!     read(4,*) 
-!     read(4,*) 
-!     read(4,*) 
-!     read(4,*) 
+  do 
+    ind = ind + 1
+    if (ind<10) then
+      write(clout_DOF(18:19),'(I1)')  ind
+    else if (ind>=10 .and. ind<100) then
+      WRITE(clout_DOF(18:20),'(I2)')   ind
+    else if (ind>=100 .and. ind<1000) then
+      WRITE(clout_DOF(18:21),'(I3)')   ind
+    else if (ind>=1000 .and. ind<10000) then
+      WRITE(clout_DOF(18:22),'(I4)')   ind
+    else if (ind>=10000 .and. ind<100000) then
+      WRITE(clout_DOF(18:23),'(I5)')   ind
+    end if
     
-!     do
-!       read(4,'(A13)',iostat=err) text2
-!       if (err/=0) then
-!         close(2)
-!         close(4)
-!         close(5)
-!         exit
-!       end if
+    ! We ask if the file exists
+    inquire(file=clout_DOF, exist=exist)
+
+    ! Checking file status
+    if (.not. exist) then
+      ! We asing the global variables
+      init_frame = 1
+      last_frame = ind - 1
+      exit
+    end if
+  end do
+
+  ! General info
+  print*, 'Frames to be analyzed: ', init_frame, ' to ' , last_frame
+
+end subroutine number_files
+
+!==============================================================================
+! Computing the size of the box
+!==============================================================================
+subroutine box_size
+
+  implicit none
+  
+  integer                            ::  i, j
+  real(kind=8)                       ::  x_max,y_max
+  real(kind=8)                       ::  x_min,y_min
+ 
+  x_min =  9999.
+  x_max = -9999.
+  y_min =  9999.
+  y_max = -9999.
+
+  do i=1, n_bodies
+    ! Omiting walls
+    if (TAB_BODIES(i)%shape == 'wallx') cycle
+
+    ! In case of disks, we check with the radius
+    if (TAB_BODIES(i)%shape == 'diskx') then
+      x_min = min(x_min,TAB_BODIES(i)%center(1) - TAB_BODIES(i)%radius)
+      x_max = max(x_max,TAB_BODIES(i)%center(1) + TAB_BODIES(i)%radius)
+      y_min = min(y_min,TAB_BODIES(i)%center(2) - TAB_BODIES(i)%radius)
+      y_max = max(y_max,TAB_BODIES(i)%center(2) + TAB_BODIES(i)%radius)
+    end if
+
+    ! In case of clusters
+    if (TAB_BODIES(i)%shape == 'clusx') then
+      do j=1, TAB_BODIES(i)%n_vertex
+        x_min = min(x_min,TAB_BODIES(i)%vertex(j,1))
+        x_max = max(x_max,TAB_BODIES(i)%vertex(j,1))
+        y_min = min(y_min,TAB_BODIES(i)%vertex(j,2))
+        y_max = max(y_max,TAB_BODIES(i)%vertex(j,2))
+      end do
+      ! for diskb
+      x_min = min(x_min,TAB_BODIES(i)%center_c1(1) - TAB_BODIES(i)%radius_c1)
+      x_max = max(x_max,TAB_BODIES(i)%center_c1(1) + TAB_BODIES(i)%radius_c1)
+      y_min = min(y_min,TAB_BODIES(i)%center_c1(2) - TAB_BODIES(i)%radius_c1)
+      y_max = max(y_max,TAB_BODIES(i)%center_c1(2) + TAB_BODIES(i)%radius_c1)
+
+      x_min = min(x_min,TAB_BODIES(i)%center_c2(1) - TAB_BODIES(i)%radius_c2)
+      x_max = max(x_max,TAB_BODIES(i)%center_c2(1) + TAB_BODIES(i)%radius_c2)
+      y_min = min(y_min,TAB_BODIES(i)%center_c2(2) - TAB_BODIES(i)%radius_c2)
+      y_max = max(y_max,TAB_BODIES(i)%center_c2(2) + TAB_BODIES(i)%radius_c2)
+    end if
+  end do
+
+  box_width  = x_max - x_min
+  box_height = y_max - y_min
+
+end subroutine box_size
+
+!==============================================================================
+! Function that initializing bodies
+!==============================================================================
+subroutine read_bodies
+
+  implicit none
+  
+  integer                                  ::  i, j , error, n_vertex
+  real(kind=8)                             ::  radius, ax1, ax2
+  real(kind=8)                             ::  radius_c1, radius_c2
+  real(kind=8), dimension(2)               ::  curr_center, c_center_c1, c_center_c2
+  real(kind=8), allocatable,dimension(:,:) ::  vertices
+  character(len=20)                        ::  clout_Bodies
+  character(len=5)                         ::  text5
+  character(len=6)                         ::  text6
+  
+  ! File name 
+  clout_Bodies = './OUTBOX/BODIES.OUT'
+  
+  ! Opening the BODIES.OUT
+  open(unit=2,file=clout_Bodies, iostat=error ,status='old')
+  ! Handling error
+  if (error/=0) then
+    print*, 'Error reading BODIES.OUT'
+    stop
+  endif
+  
+  ! General info
+  print*, 'Reading BODIES file'
+  
+  ! Reading the number of bodies of each type
+  do
+    ! Read
+    read(2,'(A6)', IOSTAT=error) text6
+    ! Handling the end of the file
+    if (error == -1) then 
+      ! We break the loop
+      exit
+    end if
+
+    ! Looking for keyword
+    if (text6 == '$tacty') then
+      read(2,'(1X,A5)') text5
+      ! The case this is a disk
+      if (text5 == 'DISKx') then 
+        n_disk = n_disk + 1
+      ! The this is a polyg or a cluster
+      else if (text5 == 'POLYG') then
+        ! We go back one line to RE-read the number of vertex
+        backspace(2)
+        ! Reading
+        read(2,'(40X, i6)') n_vertex
+        do i=1, n_vertex
+          read(2,*) ! Skipping lines
+        end do 
+        ! Checking if this is a cluster with DISKb
+        read(2,'(1X,A5)') text5
+        if (text5 == 'DISKb') then 
+          n_cluster = n_cluster + 1
+        else 
+          n_polyg = n_polyg + 1
+        end if
+      ! The case this is a wall
+      else if (text5 == 'JONCx') then 
+        n_wall = n_wall + 1
+      else 
+        print*, 'Unknown body type'
+        print*, text5
+        stop
+      end if
+    end if
+  end do
+  
+  ! General info
+  print*, 'Number of disks:   ', n_disk
+  print*, 'Number of polyg:   ', n_polyg
+  print*, 'Number of cluster: ', n_cluster
+  print*, 'Number of walls:   ', n_wall
+
+  ! Defining the total number of particles
+  n_bodies = n_disk + n_polyg + n_cluster + n_wall
+
+  ! Allocating the tables
+  if (allocated(TAB_BODIES)) deallocate(TAB_BODIES)
+  allocate(TAB_BODIES(n_bodies))
+
+  ! Rewinding the file
+  rewind(2)
+
+  ! Body counter
+  i = 0
+  do
+    read(2,'(A6)', IOSTAT=error) text6
+    ! Handling the end of the file
+    if (error == -1) then
+      ! We close the file
+      close(2) 
+      ! We break the loop
+      exit
+    end if
+
+    if (text6 == '$bdyty') then
+      i = i + 1
+      read(2,*) ! Skippable
+      read(2,*) ! Skippable
+      read(2,'(35X,D14.7)') radius
+      read(2,*) ! Skippable
+      read(2,'(29X, 2(5x,D14.7,2X))') curr_center(1), curr_center(2)
+      read(2,*) ! Skippable
+      read(2,'(1X,A5)') text5
+
+      ! The case this is a disk
+      if (text5 == 'DISKx') then
+        ! Loading the info
+        TAB_BODIES(i)%shape = 'diskx'
+        TAB_BODIES(i)%radius = radius
+        TAB_BODIES(i)%center_ref = curr_center
+        TAB_BODIES(i)%area = pi*radius**2
+      end if
+      ! The this is a polyg or a cluster
+      if (text5 == 'POLYG') then
+        ! We go back one line to RE-read the number of vertex
+        backspace(2)
+        ! Reading
+        read(2,'(40X, i6)') n_vertex
+        ! Allocating vertex space
+        if (allocated(vertices)) deallocate(vertices)
+        if (allocated(TAB_BODIES(i)%vertex)) deallocate(TAB_BODIES(i)%vertex)
+        if (allocated(TAB_BODIES(i)%vertex_ref)) deallocate(TAB_BODIES(i)%vertex_ref)
+
+        allocate(vertices(n_vertex,2))
+        allocate(TAB_BODIES(i)%vertex(n_vertex,2))
+        allocate(TAB_BODIES(i)%vertex_ref(n_vertex,2))
+
+        ! Reading the vertices
+        do j=1, n_vertex
+          read(2,'(29X, 2(5x,D14.7,2X))') vertices(j,1), vertices(j,2)
+        end do 
+
+        ! Checking if this is a cluster with DISKb
+        read(2,'(1X,A5)') text5
+        if (text5 == 'DISKb') then
+          backspace(2)
+          read(2,'(35X,D14.7)') radius_c1
+          read(2,'(29X, 2(5x,D14.7,2X))') c_center_c1(1), c_center_c1(2)
+          read(2,'(35X,D14.7)') radius_c2
+          read(2,'(29X, 2(5x,D14.7,2X))') c_center_c2(1), c_center_c2(2)
+
+          ! Loading the info for a cluster
+          TAB_BODIES(i)%shape = 'clusx'
+          TAB_BODIES(i)%radius = radius
+          TAB_BODIES(i)%center_ref = curr_center
+          TAB_BODIES(i)%center_ref_c1 = c_center_c1
+          TAB_BODIES(i)%center_ref_c2 = c_center_c2
+          TAB_BODIES(i)%n_vertex = n_vertex
+          TAB_BODIES(i)%vertex_ref = vertices
+          TAB_BODIES(i)%radius_c1 = radius_c1
+          TAB_BODIES(i)%radius_c2 = radius_c2
+
+          ! Computing the real area of this cluster
+          TAB_BODIES(i)%area = pi*radius_c1**2
+
+          do j=1,n_vertex-2
+            TAB_BODIES(i)%area = TAB_BODIES(i)%area + &
+                        0.5*(((vertices(j+1,1) - vertices(1,1)) &
+                           *  (vertices(j+2,2) - vertices(1,2))) &
+                           - ((vertices(j+1,2) - vertices(1,2)) &
+                           *  (vertices(j+2,1) - vertices(1,1))))
+          enddo
+        else 
+          ! Loading the info for a polygon
+          TAB_BODIES(i)%shape = 'polyx'
+          TAB_BODIES(i)%radius = radius
+          TAB_BODIES(i)%center_ref = curr_center
+          TAB_BODIES(i)%vertex_ref = vertices
+          TAB_BODIES(i)%n_vertex = n_vertex
+
+          ! Computing the area of this polygon
+
+          do j=1,n_vertex-2
+            TAB_BODIES(i)%area = TAB_BODIES(i)%area + &
+                        0.5*(((vertices(1,j+1) - vertices(1,1)) &
+                           *  (vertices(2,j+2) - vertices(2,1))) &
+                           - ((vertices(2,j+1) - vertices(2,1)) &
+                           *  (vertices(1,j+2) - vertices(1,1))))
+          end do
+        end if
+      end if
+      ! The case this is a wall
+      if (text5 == 'JONCx') then 
+        ! We go back one line to RE-read the ax1 and ax2
+        backspace(2)
+        read(2,'(29X, 2(5x,D14.7,2X))') ax1, ax2
+
+        ! Loading the info for the wall
+        TAB_BODIES(i)%shape = 'wallx'
+        TAB_BODIES(i)%radius = radius
+        TAB_BODIES(i)%center_ref = curr_center
+        TAB_BODIES(i)%ax1 = ax1
+        TAB_BODIES(i)%ax2 = ax2
+      end if
+    end if
+  end do
+end subroutine read_bodies
+
+!==============================================================================
+! Function that updates bodies with current DOF
+!==============================================================================
+subroutine update_bodies(i_)
+
+  implicit none
+
+  integer, intent(in)           :: i_
+  integer                       :: i, j, error
+  real(kind=8)                  :: rot
+  real(kind=8),dimension(2)     :: c_center
+  real(kind=8),dimension(3)     :: veloc
+  character(len=6)              :: text6
+  character(len=23)             :: clout_DOF
+
+
+  clout_DOF    = './OUTBOX/DOF.OUT.     '
+  
+  ! Setting the index of the output files
+  if (i_<10) then
+    write(clout_DOF(18:19),'(I1)')  i_
+  else if (i_>=10 .and. i_<100) then
+    WRITE(clout_DOF(18:20),'(I2)')   i_
+  else if (i_>=100 .and. i_<1000) then
+    WRITE(clout_DOF(18:21),'(I3)')   i_
+  else if (i_>=1000 .and. i_<10000) then
+    WRITE(clout_DOF(18:22),'(I4)')   i_
+  else if (i_>=10000 .and. i_<100000) then
+    WRITE(clout_DOF(18:23),'(I5)')   i_
+  end if
+
+  open(unit=2,file=clout_DOF,status='old')
+
+  ! Reading general info 
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  read(2,'(7X,i8,19X,D14.7)') step, time
+
+  ! Body counter
+  i = 0
+  do
+    read(2,'(A6)',IOSTAT=error) text6
+    ! Handling the end of the file
+    if (error /= 0) then
+      ! We close the file
+      close(2) 
+      ! We break the loop
+      exit
+    end if
+
+    if (text6 == '$bdyty') then
+      i = i + 1
+      read(2,*) ! Skippable line
+      read(2,*) ! Skippable line
+        
+      read(2,'(29X, 3(5x,D14.7,2X))') c_center(1),c_center(2),rot
+      read(2,'(29X, 3(5x,D14.7,2X))') veloc(1),veloc(2),veloc(3)
+
+      ! Appling the relative displacement
+      TAB_BODIES(i)%center=TAB_BODIES(i)%center_ref+c_center
+      TAB_BODIES(i)%rot=rot
+
+      TAB_BODIES(i)%veloc(1) = veloc(1)
+      TAB_BODIES(i)%veloc(2) = veloc(2)
+      TAB_BODIES(i)%veloc(3) = veloc(3)
       
-!       if (text2 == '!-------------') exit
-!       if (text2 == '$icdan  PLPLx') then
-!         N_PLPLx = N_PLPLx +1
-!       end if
-!       if (text2 == '$icdan  PLJCx') then
-!         N_PLJCx = N_PLJCx +1
-!       end if
-!       if (text2 == '$icdan  PTPT2') then
-!         N_PTPT2 = N_PTPT2 +1
-!       end if
-!     end do
+      ! Applying the relative rotation if this is a polyg or a cluster
+      if (TAB_BODIES(i)%shape == 'polyx') then
+        do j=1,TAB_BODIES(i)%n_vertex
+          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
+                                      TAB_BODIES(i)%center(1)
+          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
+                                      TAB_BODIES(i)%center(2)
+        end do
+      end if
+      if (TAB_BODIES(i)%shape == 'clusx') then
+        do j=1,TAB_BODIES(i)%n_vertex
+          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
+                                      TAB_BODIES(i)%center(1)
+          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
+                                      TAB_BODIES(i)%center(2)
+        end do
+        TAB_BODIES(i)%center_c1(1) = TAB_BODIES(i)%center_ref_c1(1) * cos(rot) - &
+                                     TAB_BODIES(i)%center_ref_c1(2) * sin(rot) + &
+                                     TAB_BODIES(i)%center(1)
+        TAB_BODIES(i)%center_c1(2) = TAB_BODIES(i)%center_ref_c1(1) * cos(rot) + &
+                                     TAB_BODIES(i)%center_ref_c1(2) * sin(rot) + &
+                                     TAB_BODIES(i)%center(2)
+        TAB_BODIES(i)%center_c2(1) = TAB_BODIES(i)%center_ref_c2(1) * cos(rot) - &
+                                     TAB_BODIES(i)%center_ref_c2(2) * sin(rot) + &
+                                     TAB_BODIES(i)%center(1)
+        TAB_BODIES(i)%center_c2(2) = TAB_BODIES(i)%center_ref_c2(1) * cos(rot) + &
+                                     TAB_BODIES(i)%center_ref_c2(2) * sin(rot) + &
+                                     TAB_BODIES(i)%center(2)
+      end if
+    end if 
+  end do 
+end subroutine update_bodies
 
-!     close(4)
+!==============================================================================
+! Reading contacts
+!==============================================================================
+subroutine read_contacts(i_)
+  
+  implicit none
+  
+  integer, intent(in)           ::  i_
+  integer                       ::  i, j, error, cd , an, id, l_ver, iadj, l_seg
+  real(kind=8)                  ::  rn, rt, gap, rn_temp, rt_temp, gap_temp
+  real(kind=8),dimension(2)     ::  coor_ctc, veloc_ctc, n_frame, coor_ctc_temp
+  character(len=5)              ::  status, i_law, text5
+  character(len=6)              ::  text6
+  character(len=13)             ::  text13
+  character(len=29)             ::  clout_Vloc
+  logical                       ::  first_double
+
+  ! The name of the file
+  clout_Vloc   = './OUTBOX/Vloc_Rloc.OUT.     '
+  
+  ! Setting the index of the output files
+  if (i_<10) then
+    write(clout_Vloc(24:25),'(I1)')  i_
+  else if (i_>=10 .and. i_<100) then
+    write(clout_Vloc(24:26),'(I2)')  i_
+  else if (i_>=100 .and. i_<1000) then
+    write(clout_Vloc(24:27),'(I3)')  i_
+  else if (i_>=1000 .and. i_<10000) then
+    write(clout_Vloc(24:28),'(I4)')  i_
+  else if (i_>=10000 .and. i_<100000) then
+    write(clout_Vloc(24:29),'(I5)')  i_
+  end if
+
+  ! Initialization of counters
+  n_dkdk = 0
+  n_plpl = 0
+  n_dkpl = 0
+  n_dkjc = 0
+  n_pljc = 0
+
+  ! Reading the Vloc_Rloc.OUT.i_
+  ! This is a pre-reading to count the number of contacts
+
+  open(unit=2,iostat=error, file=clout_Vloc,status='old')
+  if (error/=0) then
+    print*, 'Error reading Vloc_Rloc'
+    print*, error
+    stop
+  end if
+
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  
+  do 
+    read(2,'(A13)',iostat=error) text13
     
-!     ! Allocating the corresponding space for the number of contacts
-!     if (allocated(TAB_CONTACT)) deallocate(TAB_CONTACT)
-!     allocate(TAB_CONTACT(N_PLPLx+N_PLJCx+N_PTPT2))
+    ! Handling the end of file
+    if (error/=0) then
+      ! Breaking the loop
+      exit
+    end if
+
+    ! Identifying the type of contact
+    if (text13 == '$icdan  DKDKx') then
+      n_dkdk = n_dkdk + 1
+    else if (text13 == '$icdan  DKJCx') then
+      n_dkjc = n_dkjc + 1
+    else if (text13 == '$icdan  PLPLx') then
+      n_plpl = n_plpl + 1
+    else if (text13 == '$icdan  PLJCx') then
+      n_pljc = n_pljc + 1
+    else if (text13 == '$icdan  DKPLx') then
+      n_dkpl = n_dkpl + 1
+    end if
+  end do
+
+  ! Total number of raw contacts
+  n_contacts_raw = n_dkdk + n_plpl + n_dkpl + n_dkjc + n_pljc
+
+  ! Genaral information
+  print*, 'Total number of raw interactions:', n_contacts_raw
+
+  ! Allocating the corresponding space for the number of contacts
+  if (allocated(TAB_CONTACT_RAW)) deallocate(TAB_CONTACT_RAW)
+  allocate(TAB_CONTACT_RAW(n_contacts_raw))
+
+  ! Rewinding file
+  rewind(2)
+
+  ! Reading and storing
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line
+  read(2,*) ! Skippable line 
+
+  ! Counter of interactions
+  i = 0
+  do
+    read(2,'(A6)',iostat=error) text6
     
-!     ! Storing the contacts information
-!     ! In the array the particle-particle contacts are stored first
-!     nb_ligneCONTACT=0
-!     nc_poly = 0
-!     nc_wall = 0
-!     nc_ptpt = 0
-    
-!     open(unit=4,file=clout_Vloc,status='old')
-!     read(4,*) 
-!     read(4,*) 
-!     read(4,*) 
-!     read(4,*) 
-!     read(4,*) 
-!     read(4,*) 
-    
-!     do
-!       read(4,'(A13)',iostat=err) text2
-      
-!       if (text2 == '$icdan  PLPLx') then
-!         nc_poly = nc_poly + 1
-!         read(4,*)
-!         read(4,'(8X,i5,23X,i5,2X,A5,9X,i5,23X,i5,2X,A5)') icdent, l_ver, i_law, ianent,l_seg, status
-!         read(4,'(29X, 3(5x,D14.7,2X))') rt,rn,rs
-!         read(4,'(29X, 3(5x,D14.7,2X))') vlt,vln,vls
-!         read(4,'(29X, 1(5x,D14.7,2X))') gap_c
-!         read(4,'(29X, 3(5x,D14.7,2X))') n1,n2,n3
-!         read(4,'(29X, 3(5x,D14.7,2X))') coor_ctc1,coor_ctc2,coor_ctc3
+    if (error /=0) then
+      ! Closing file
+      close(2)
+      ! Breaking loop
+      exit
+    end if
 
-!         !if (status(1:1) == "W") then
-!         read(4,*)
-!         read(4,'(3(1X,D14.7))') gap0, cd_len, tang_disp
-!         !end if
+    ! For contacts dkdk or dkjc
+    if (text6 == '$icdan') then
+      i = i + 1
+      backspace(2)
+      read(2,'(8X,A5,2X,i7)') text5, id
+      read(2,*) ! Skippable line
 
-!         nb_ligneCONTACT=nb_ligneCONTACT+1
+      if (text5 == 'DKDKx' .or. text5 == 'DKJCx') then
+        read(2,'(8X,i5,16X,A5,9x,i5,16X,A5,2X,i5)')             cd, i_law, an, status, iadj
+      else if (text5 == 'PLPLx') then
+        read(2,'(8X,i5,23X,i5,2X,A5,9X,i5,23X,i5,2X,A5,2X,i5)') cd, l_ver, i_law, an, l_seg, status, iadj
+      else if (text5 == 'PLJCx') then
+        read(2,'(8X,i5,23X,i5,2X,A5,9X,i5,30X,A5,2X,i5)')       cd, l_ver, i_law, an, status, iadj
+      else if (text5 == 'DKPLx') then
+        read(2,'(8X,i5,16X,A5,9x,i5,23X,i5,16X,A5,2X,i5)')      cd, i_law, an, l_ver, status, iadj
+      else 
+        print*, 'Unknown contact type'
+        stop
+      end if 
 
-!         TAB_CONTACT(nc_poly)%icdent=icdent
-!         TAB_CONTACT(nc_poly)%ianent=ianent
-!         TAB_CONTACT(nc_poly)%status=status
-!         TAB_CONTACT(nc_poly)%sect  =l_seg
-!         TAB_CONTACT(nc_poly)%cdver =l_ver
+      read(2,'(29X, 2(5x,D14.7,2X))') rt,rn
+      read(2,'(29X, 2(5x,D14.7,2X))') veloc_ctc(2), veloc_ctc(1)
+      read(2,'(29X, 1(5x,D14.7,2X))') gap
+      read(2,'(29X, 2(5x,D14.7,2X))') n_frame(1), n_frame(2)
+      read(2,'(29X, 2(5x,D14.7,2X))') coor_ctc(1), coor_ctc(2)
 
-!         ! Giving some value to the status to average the TAB_CONTACT_POLYG somehow
-!         if (status == 'noctc') then
-!           TAB_CONTACT(nc_poly)%status_points = 3
-!         else if(status(1:3) == 'sli') then
-!           TAB_CONTACT(nc_poly)%status_points = 2
-!         else if(status == 'stick') then
-!           TAB_CONTACT(nc_poly)%status_points = 1
-!         else if(status == 'Wnctc') then
-!           TAB_CONTACT(nc_poly)%status_points = -1
-!         else if(status(1:3) == 'Wsl') then
-!           TAB_CONTACT(nc_poly)%status_points = -2
-!         else if(status == 'Wstck') then
-!           TAB_CONTACT(nc_poly)%status_points = -3
-!         end if
+      TAB_CONTACT_RAW(i)%id = id
+      TAB_CONTACT_RAW(i)%cd=cd
+      TAB_CONTACT_RAW(i)%an=an
+      TAB_CONTACT_RAW(i)%n_frame=n_frame
+      TAB_CONTACT_RAW(i)%t_frame(1)=n_frame(2)
+      TAB_CONTACT_RAW(i)%t_frame(2)=-n_frame(1)
+      TAB_CONTACT_RAW(i)%coor_ctc=coor_ctc
+      TAB_CONTACT_RAW(i)%rn=rn
+      TAB_CONTACT_RAW(i)%rt=rt
+      TAB_CONTACT_RAW(i)%n_interact = 0
+      TAB_CONTACT_RAW(i)%i_law = i_law
+      TAB_CONTACT_RAW(i)%nature = text5
 
-!         !TAB_CONTACT(nc_poly)%law=i_law
-!         !if (status(1:1) == "W") then
-!         TAB_CONTACT(nc_poly)%gap0=gap0
-!         TAB_CONTACT(nc_poly)%gap = gap_c
-!         TAB_CONTACT(nc_poly)%cd_len=cd_len
-!         TAB_CONTACT(nc_poly)%tang_disp = tang_disp
-!         !else
-!         !  TAB_CONTACT(nc_poly)%gap0=-99.
-!         !  TAB_CONTACT(nc_poly)%gap = gap_c
-!         !  TAB_CONTACT(nc_poly)%cd_len=-99.
-!         !  TAB_CONTACT(nc_poly)%tang_disp = -99.
-!         !end if
+      TAB_CONTACT_RAW(i)%iadj = iadj
 
-!         TAB_CONTACT(nc_poly)%n(1)=n1
-!         TAB_CONTACT(nc_poly)%n(2)=n2
-!         TAB_CONTACT(nc_poly)%n(3)=n3
-!         TAB_CONTACT(nc_poly)%t(1)=n2
-!         TAB_CONTACT(nc_poly)%t(2)=-n1
-!         TAB_CONTACT(nc_poly)%t(3)=0.D0
-!         TAB_CONTACT(nc_poly)%coor_ctc(1)=coor_ctc1
-!         TAB_CONTACT(nc_poly)%coor_ctc(2)=coor_ctc2
-!         TAB_CONTACT(nc_poly)%coor_ctc(3)=coor_ctc3
-!         TAB_CONTACT(nc_poly)%rn=rn
-!         TAB_CONTACT(nc_poly)%rt=rt
-!         TAB_CONTACT(nc_poly)%rs=rs
-!         TAB_CONTACT(nc_poly)%nature='PLPLx'
-!         TAB_CONTACT(nc_poly)%type = 0
-!         TAB_CONTACT(nc_poly)%vn=vln
-!         TAB_CONTACT(nc_poly)%vt=vlt
-!         TAB_CONTACT(nc_poly)%vs=vls
-!         TAB_CONTACT(nc_poly)%law=i_law
-!       end if
-      
-!       if (text2 == '$icdan  PLJCx') then
-!         nc_wall = nc_wall + 1
-!         read(4,*)
-!         read(4,'(8X,i5,30X,A5,9X,i5,30X,A5,2X,i5)') icdent, i_law, ianent,status,l_adj
-!         read(4,'(29X, 3(5x,D14.7,2X))') rt,rn,rs
-!         read(4,'(29X, 3(5x,D14.7,2X))') vlt,vln,vls
-!         read(4,'(29X, 1(5x,D14.7,2X))') gap_c
-!         read(4,'(29X, 3(5x,D14.7,2X))') n1,n2,n3
-!         read(4,'(29X, 3(5x,D14.7,2X))') coor_ctc1,coor_ctc2,coor_ctc3
-        
-!         nb_ligneCONTACT=nb_ligneCONTACT+1
-        
-!         TAB_CONTACT(N_PLPLx+nc_wall)%icdent=icdent
-!         TAB_CONTACT(N_PLPLx+nc_wall)%ianent=ianent
-!         TAB_CONTACT(N_PLPLx+nc_wall)%status=status
-!         TAB_CONTACT(N_PLPLx+nc_wall)%status_points=99
-!         TAB_CONTACT(N_PLPLx+nc_wall)%n(1)=n1
-!         TAB_CONTACT(N_PLPLx+nc_wall)%n(2)=n2
-!         TAB_CONTACT(N_PLPLx+nc_wall)%n(3)=n3
-!         TAB_CONTACT(N_PLPLx+nc_wall)%t(1)=n2
-!         TAB_CONTACT(N_PLPLx+nc_wall)%t(2)=-n1
-!         TAB_CONTACT(N_PLPLx+nc_wall)%t(3)=0.D0
-!         TAB_CONTACT(N_PLPLx+nc_wall)%coor_ctc(1)=coor_ctc1
-!         TAB_CONTACT(N_PLPLx+nc_wall)%coor_ctc(2)=coor_ctc2
-!         TAB_CONTACT(N_PLPLx+nc_wall)%coor_ctc(3)=coor_ctc3
-!         TAB_CONTACT(N_PLPLx+nc_wall)%rn=rn
-!         TAB_CONTACT(N_PLPLx+nc_wall)%rt=rt
-!         TAB_CONTACT(N_PLPLx+nc_wall)%rs=rs
-!         TAB_CONTACT(N_PLPLx+nc_wall)%nature='PLJCx'
-!         TAB_CONTACT(N_PLPLx+nc_wall)%law=i_law
-!         TAB_CONTACT(N_PLPLx+nc_wall)%type  = 0
-!         TAB_CONTACT(N_PLPLx+nc_wall)%vn=vln
-!         TAB_CONTACT(N_PLPLx+nc_wall)%vt=vlt
-!         TAB_CONTACT(N_PLPLx+nc_wall)%vs=vls
-!         TAB_CONTACT(N_PLPLx+nc_wall)%adj=l_adj
+      if (text5 == 'PLPLx') then
+        TAB_CONTACT_RAW(i)%l_ver = l_ver
+        TAB_CONTACT_RAW(i)%l_seg = l_seg
+      end if
 
-!         ! Default initialization
-!         TAB_CONTACT(N_PLPLx+nc_wall)%gap0=-99.
-!         TAB_CONTACT(N_PLPLx+nc_wall)%gap = gap_c
-!         TAB_CONTACT(N_PLPLx+nc_wall)%cd_len=-99.
-!         TAB_CONTACT(N_PLPLx+nc_wall)%tang_disp = -99.
-!       end if
+      if (text5 == 'PLJCx') then
+        TAB_CONTACT_RAW(i)%l_ver = l_ver
+      end if
 
-!       if (text2 == '$icdan  PTPT2') then
-!         nc_ptpt = nc_ptpt + 1
-!         read(4,*)
-!         read(4,'(8X,i5,16X,A5,9X,i5,16X,A5,2X,i5)') icdent, i_law, ianent,status,l_adj
-!         read(4,'(29X, 3(5x,D14.7,2X))') rt,rn,rs
-!         read(4,'(29X, 3(5x,D14.7,2X))') vlt,vln,vls
-!         read(4,'(29X, 1(5x,D14.7,2X))') gap_c
-!         read(4,'(29X, 3(5x,D14.7,2X))') n1,n2,n3
-!         read(4,'(29X, 3(5x,D14.7,2X))') coor_ctc1,coor_ctc2,coor_ctc3
-        
-!         nb_ligneCONTACT=nb_ligneCONTACT+1
-        
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%icdent=icdent
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%ianent=ianent
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%status=status
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%status_points=99
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%n(1)=n1
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%n(2)=n2
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%n(3)=n3
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%t(1)=n2
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%t(2)=-n1
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%t(3)=0.D0
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%coor_ctc(1)=coor_ctc1
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%coor_ctc(2)=coor_ctc2
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%coor_ctc(3)=coor_ctc3
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%rn=rn
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%rt=rt
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%rs=rs
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%nature='PTPT2'
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%law=i_law
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%type  = 0
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%gap = gap_c
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%vn=vln
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%vt=vlt
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%vs=vls
-!         TAB_CONTACT(N_PLPLx+N_PLJCx+nc_ptpt)%adj=l_adj
+      if (text5 == 'DKPLx') then
+        TAB_CONTACT_RAW(i)%l_ver = l_ver
+      end if
+    end If
+  end do
 
-!         read(4,*)
-!         read(4,'(1X,D14.7)') gap0
-
-!         TAB_CONTACT(N_PLPLx+nc_wall+nc_ptpt)%gap0=gap0
-        
-!         ! Default initialization
-!         TAB_CONTACT(N_PLPLx+nc_wall+nc_ptpt)%cd_len=-99.
-!         TAB_CONTACT(N_PLPLx+nc_wall+nc_ptpt)%tang_disp = -99.
-!       end if
-
-!       if (nc_poly+nc_wall+nc_ptpt == N_PLPLx + N_PLJCx + N_PTPT2) then
-!         exit
-!       endif
-!     end do
-
-!     print*,'Step:', step
-!     print*,'Time:', time
-!   end if
+  ! Counter of simple and double interactions
+  n_simple = 0
+  n_double = 0
   
-!   ! It's necessary to define the type of contact (i.e., simple or double)
-!   do i=1,nb_ligneCONTACT-1
-!     if (TAB_CONTACT(i)%type>0) cycle
-!     if ((TAB_CONTACT(i)%icdent == TAB_CONTACT(i+1)%icdent) .and. &
-!         (TAB_CONTACT(i)%ianent == TAB_CONTACT(i+1)%ianent)) then
-!       TAB_CONTACT(i)%type=2
-!       TAB_CONTACT(i+1)%type=2
-!     else
-!       TAB_CONTACT(i)%type=1
-!     end if
-!   end do
+  ! It's necessary to define the type of contact (i.e., simple or double)
+  do i=1,n_contacts_raw-1
+    if (TAB_CONTACT_RAW(i)%n_interact>0) cycle
+    if ((TAB_CONTACT_RAW(i)%cd == TAB_CONTACT_RAW(i+1)%cd) .and. &
+        (TAB_CONTACT_RAW(i)%an == TAB_CONTACT_RAW(i+1)%an)) then
+        TAB_CONTACT_RAW(i)%n_interact=2
+        TAB_CONTACT_RAW(i+1)%n_interact=2
+        n_double = n_double + 1
+    else
+      TAB_CONTACT_RAW(i)%n_interact=1
+      n_simple = n_simple + 1
+    end if
+  end do
   
-!   ! Storing the contacts
-!   n_simple = 0
-!   n_double = 0
-!   first_double=.true.
-  
-!   do i=1,nb_ligneCONTACT
-!     if (TAB_CONTACT(i)%type==1) n_simple = n_simple + 1
-!     if (TAB_CONTACT(i)%type==2) n_double = n_double + 1
-!   end do
-  
-!   if (allocated(TAB_CONTACT_POLYG)) deallocate(TAB_CONTACT_POLYG)
-!   allocate(TAB_CONTACT_POLYG(n_simple+n_double))
-  
-!   nb_ligneCONTACT_POLYG = 0
+  ! The real number of contacts
+  n_contacts = n_simple + n_double
 
-!   print*,'---> Checking doble contacts'
-  
-!   do i=1,nb_ligneCONTACT
-!     if (TAB_CONTACT(i)%type==1) then
-!       nb_ligneCONTACT_POLYG                             = nb_ligneCONTACT_POLYG +1
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%icdent   = TAB_CONTACT(i)%icdent
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%ianent   = TAB_CONTACT(i)%ianent
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%n        = TAB_CONTACT(i)%n
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%t        = TAB_CONTACT(i)%t
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%coor_ctc = TAB_CONTACT(i)%coor_ctc
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%rn       = TAB_CONTACT(i)%rn
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%rt       = TAB_CONTACT(i)%rt
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%rs       = TAB_CONTACT(i)%rs
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%nature   = TAB_CONTACT(i)%nature
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%type     = 1
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%status_points = TAB_CONTACT(i)%status_points
-!       TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%status   = TAB_CONTACT(i)%status
-!     end if
-!     if (TAB_CONTACT(i)%type==2) then
-!       if (first_double) then
-!         coor_ctc1_temp = TAB_CONTACT(i)%coor_ctc(1)
-!         coor_ctc2_temp = TAB_CONTACT(i)%coor_ctc(2)
-!         coor_ctc3_temp = TAB_CONTACT(i)%coor_ctc(3)
-!         rn_temp        = TAB_CONTACT(i)%rn
-!         rt_temp        = TAB_CONTACT(i)%rt
-!         rs_temp        = TAB_CONTACT(i)%rs
-!         first_double   = .false.
-!         l_stat_p       = TAB_CONTACT(i)%status_points
-!         gap_temp       = TAB_CONTACT(i)%gap
-!         cycle
-!       else if (.not. first_double) then
-!         nb_ligneCONTACT_POLYG                                 = nb_ligneCONTACT_POLYG+1
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%icdent       = TAB_CONTACT(i)%icdent
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%ianent       = TAB_CONTACT(i)%ianent
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%n            = TAB_CONTACT(i)%n
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%t            = TAB_CONTACT(i)%t
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%coor_ctc(1)  = (TAB_CONTACT(i)%coor_ctc(1) + coor_ctc1_temp) /2
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%coor_ctc(2)  = (TAB_CONTACT(i)%coor_ctc(2) + coor_ctc2_temp) /2
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%coor_ctc(3)  = (TAB_CONTACT(i)%coor_ctc(3) + coor_ctc3_temp) /2
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%gap          = (TAB_CONTACT(i)%gap + gap_temp) /2
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%rn           = TAB_CONTACT(i)%rn + rn_temp
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%rt           = TAB_CONTACT(i)%rt + rt_temp
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%rs           = TAB_CONTACT(i)%rs + rs_temp
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%nature       = TAB_CONTACT(i)%nature
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%type         = 2
+  ! Counter of real interactions
+  j = 0
 
-!         ! Choosing the most stable of the status points
-!         TAB_CONTACT_POLYG(nb_ligneCONTACT_POLYG)%status_points= min(l_stat_p, TAB_CONTACT(i)%status_points)
-!         first_double                                          = .true.
-!       end if
-!     end if
-!   end do
+  ! Allocating a new table
+  if (allocated(TAB_CONTACT)) deallocate(TAB_CONTACT)
+  allocate(TAB_CONTACT(n_contacts))
+
+  if (n_contacts .lt. n_contacts_raw) then
+    do i=1,n_contacts_raw
+      ! In the case of a simple contact... we copy the info
+      if (TAB_CONTACT_RAW(i)%n_interact==1) then
+        j = j +1
+        TAB_CONTACT(j)%cd         = TAB_CONTACT_RAW(i)%cd
+        TAB_CONTACT(j)%an         = TAB_CONTACT_RAW(i)%an
+        TAB_CONTACT(j)%n_frame    = TAB_CONTACT_RAW(i)%n_frame
+        TAB_CONTACT(j)%t_frame    = TAB_CONTACT_RAW(i)%t_frame
+        TAB_CONTACT(j)%coor_ctc   = TAB_CONTACT_RAW(i)%coor_ctc
+        TAB_CONTACT(j)%rn         = TAB_CONTACT_RAW(i)%rn
+        TAB_CONTACT(j)%rt         = TAB_CONTACT_RAW(i)%rt
+        TAB_CONTACT(j)%nature     = TAB_CONTACT_RAW(i)%nature
+        TAB_CONTACT(j)%n_interact = 1
+        TAB_CONTACT(j)%status     = TAB_CONTACT_RAW(i)%status
+      end if
+      if (TAB_CONTACT_RAW(i)%n_interact==2) then
+        if (first_double) then
+          coor_ctc_temp = TAB_CONTACT_RAW(i)%coor_ctc
+          rn_temp        = TAB_CONTACT_RAW(i)%rn
+          rt_temp        = TAB_CONTACT_RAW(i)%rt
+          first_double   = .false.
+          gap_temp       = TAB_CONTACT_RAW(i)%gap
+          cycle
+        else if (.not. first_double) then
+          j = j+1
+          TAB_CONTACT(j)%cd           = TAB_CONTACT_RAW(i)%cd
+          TAB_CONTACT(j)%an           = TAB_CONTACT_RAW(i)%an
+          TAB_CONTACT(j)%n_frame      = TAB_CONTACT_RAW(i)%n_frame
+          TAB_CONTACT(j)%t_frame      = TAB_CONTACT_RAW(i)%t_frame
+          TAB_CONTACT(j)%coor_ctc     = (TAB_CONTACT_RAW(i)%coor_ctc + coor_ctc_temp)/2
+          TAB_CONTACT(j)%gap          = (TAB_CONTACT_RAW(i)%gap + gap_temp)/2
+          TAB_CONTACT(j)%rn           = TAB_CONTACT_RAW(i)%rn + rn_temp
+          TAB_CONTACT(j)%rt           = TAB_CONTACT_RAW(i)%rt + rt_temp
+          TAB_CONTACT(j)%nature       = TAB_CONTACT_RAW(i)%nature
+          TAB_CONTACT(j)%n_interact   = 2
+          first_double                                          = .true.
+        end if
+      end if
+    end do
+  else if(n_contacts_raw == n_contacts) then
+    TAB_CONTACT = TAB_CONTACT_RAW
+  else
+    print*, 'Error in double contacts anaylsis'
+    stop
+  end if
 
 !   ! If there are cohesive particles they should know they are in a group
 !   n_groups = 0
@@ -1130,142 +1160,161 @@ call read_bodies()
 ! !    end if
 ! !  end do
 
-!   print*,'---> Reading Done!'
-! end subroutine read_Vloc_dof_bodies
+end subroutine read_contacts
 
+!==============================================================================
+! Computing the walls' positions
+!==============================================================================
+subroutine walls_pos(i_, init_, last_)
+  
+  implicit none
 
-! !==============================================================================
-! ! Walls positions
-! !==============================================================================
-! subroutine wallsposition
-  
-!   implicit none
-  
-!   if (n_walls == 4) then
-!     if (first_over_all) then
-!       write(108,*) '#   time     ', '   wall 1-X  ', '   wall 1-Y  ', &
-!                                     '   wall 2-X  ', '   wall 2-Y  ', &
-!                                     '   wall 3-X  ', '   wall 3-Y  ', &
-!                                     '   wall 4-X  ', '   wall 4-Y  '
-!     endif
-!     write(108,'(9(1X,E12.5))') time, TAB_PLAN(1)%center(1), TAB_PLAN(1)%center(2)+TAB_PLAN(1)%ax2 &
-!                                , TAB_PLAN(2)%center(1), TAB_PLAN(2)%center(2)-TAB_PLAN(2)%ax2&
-!                                , TAB_PLAN(3)%center(1)+TAB_PLAN(3)%ax2, TAB_PLAN(3)%center(2) &
-!                                , TAB_PLAN(4)%center(1)-TAB_PLAN(4)%ax2, TAB_PLAN(4)%center(2)
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i, j
+  character, dimension(1)                  :: id_wall=' '
+  real(kind=8), allocatable,dimension(:,:) :: array_wall
 
-!   else if (n_walls == 2) then
-!     if (first_over_all) then
-!       write(108,*) '#   time     ', '   wall 1-X  ', '   wall 1-Y  ', &
-!                                     '   wall 2-X  ', '   wall 2-Y  '
-!     end if
-!     write(108,'(5(1X,E12.5))') time, TAB_PLAN(1)%center(1), TAB_PLAN(1)%center(2)+TAB_PLAN(1)%ax2 &
-!                                  , TAB_PLAN(2)%center(1), TAB_PLAN(2)%center(2)-TAB_PLAN(2)%ax2
-!   else
-!     print*, 'Invalid number of walls'
-!     stop
-!   end if
-!   print*, 'Write Walls position            ---> Ok!'
-! end subroutine wallsposition
+  
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=101,file='./POSTPRO/WALL_POS.DAT',status='replace')
+    write(101,'(A)',advance='no') '#   time     '
 
+    do i=1, n_wall - 1
+      write(id_wall,'(i1)') i
+      write(101,'(A)',advance='no') '    Wall '//id_wall//'-X    Wall '//id_wall//'-Y  '
+    end do
+    write(id_wall,'(i1)') i
+    write(101,'(A)') '    Wall '//id_wall//'-X    Wall '//id_wall//'-Y  ' 
+  end if
 
-! !==============================================================================
-! ! Walls forces
-! !==============================================================================
-! subroutine walls_force
-  
-!   implicit none
-  
-!   integer                            :: i, idw1, idw2, idw3, idw4
-!   real (kind=8)                      :: fn1, fn2, fn3, fn4
-!   real (kind=8)                      :: ft1, ft2, ft3, ft4
-  
-!   fn1 = 0
-!   fn2 = 0
-!   fn3 = 0
-!   fn4 = 0 
-  
-!   ft1 = 0
-!   ft2 = 0
-!   ft3 = 0
-!   ft4 = 0 
-  
-!   idw1 = n_particles + 1 
-!   idw2 = n_particles + 2 
-!   idw3 = n_particles + 3
-!   idw4 = n_particles + 4
-  
-  
-!   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature== 'PLJCx') then
-!       if(TAB_CONTACT_POLYG(i)%ianent == idw1) then
-!         fn1 = fn1 + abs(TAB_CONTACT_POLYG(i)%rn)
-!         ft1 = ft1 + abs(TAB_CONTACT_POLYG(i)%rt)
-        
-!       elseif(TAB_CONTACT_POLYG(i)%ianent == idw2) then
-!         fn2 = fn2 + abs(TAB_CONTACT_POLYG(i)%rn)
-!         ft2 = ft2 + abs(TAB_CONTACT_POLYG(i)%rt)
-!       end if 
-!       if (n_walls .gt. 2) then 
-!         if(TAB_CONTACT_POLYG(i)%ianent == idw3) then
-!           fn3 = fn3 + abs(TAB_CONTACT_POLYG(i)%rn)
-!           ft3 = ft3 + abs(TAB_CONTACT_POLYG(i)%rt)
+  ! Allocating an array to contain the info
+  if (allocated(array_wall)) deallocate(array_wall)
+  allocate(array_wall(n_wall,2))
 
-!         elseif(TAB_CONTACT_POLYG(i)%ianent == idw4) then
-!           fn4 = fn4 + abs(TAB_CONTACT_POLYG(i)%rn)
-!           ft4 = ft4 + abs(TAB_CONTACT_POLYG(i)%rt)
-!         end if
-!       end if
-!     end if
-!   end do
-  
-!   if (n_walls == 4) then 
-!     if (first_over_all) then
-!       write(109,*) '#   time     ', '     fn1     ', '     ft1     ', &
-!                    '     fn2     ', '     ft2     ', &
-!                    '     fn3     ', '     ft3     ', &
-!                    '     fn4     ', '     ft4    '
-!     endif
-!     write(109,'(9(1X,E12.5))') time, fn1, ft1, fn2, ft2, fn3, ft3, fn4, ft4
-!   else if (n_walls == 2) then
-!     if (first_over_all) then
-!       write(109,*) '#   time     ', '     fn1     ', '     ft1     ', &
-!                    '     fn2     ', '     ft2     '
-!     endif
-!     write(109,'(5(1X,E12.5))') time, fn1, ft1, fn2, ft2
-!   end if
+  ! Counter of walls
+  j=0
+  ! We look for wall type of bodies. 
+  do i=1, n_bodies
+    if (TAB_BODIES(i)%shape /= 'wallx') cycle
+    j = j + 1
+    array_wall(j,1) = TAB_BODIES(i)%center(1)
+    array_wall(j,2) = TAB_BODIES(i)%center(2)
+  end do
 
-!   print*, 'Write Walls forces  ---> Ok!'
+  ! Writing in the file
+  write(101,'(1X,E12.5)', advance='no') time
+  do i=1, n_wall-1
+    write(101,'(2(1X,E12.5))', advance='no') array_wall(i,1), array_wall(i,2) 
+  end do
+  write(101,'(2(1X,E12.5))') array_wall(n_wall,1), array_wall(n_wall,2) 
 
-! end subroutine walls_force
+  if (i_ == last_) then
+    close(101)
+  end if
+  ! General info
+  print*, 'Write walls position          ---> Ok!'
+end subroutine walls_pos
 
+!==============================================================================
+! Computing the forces on the walls
+!==============================================================================
+subroutine walls_frc(i_, init_, last_)
+  
+  implicit none
 
-! !==============================================================================
-! ! Calculation of compacity
-! !==============================================================================
-! subroutine compacity
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i, j
+  real(kind=8), dimension(2)               :: f_vec
+  character, dimension(1)                  :: id_wall=' '
+  real(kind=8), allocatable,dimension(:,:) :: array_wall
+
   
-!   implicit none
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=102,file='./POSTPRO/WALL_FRC.DAT',status='replace')
+    write(102,'(A)',advance='no') '#   time     '
+
+    do i=1, n_wall - 1
+      write(id_wall,'(i1)') i
+      write(102,'(A)',advance='no') '    Wall '//id_wall//'-X    Wall '//id_wall//'-Y  '
+    end do
+    write(id_wall,'(i1)') i
+    write(102,'(A)') '    Wall '//id_wall//'-X    Wall '//id_wall//'-Y  ' 
+  end if
+
+  ! Allocating an array to contain the info
+  if (allocated(array_wall)) deallocate(array_wall)
+  allocate(array_wall(n_wall,2))
+
+  ! Initializing
+  array_wall(:,:) = 0.0
+
+  ! We look for interactions with walls
+  do i=1, n_contacts
+    if (TAB_CONTACT(i)%nature == 'DKJCx' .or. TAB_CONTACT(i)%nature == 'PLJCx') then
+      ! Setting the correct id matching the number of wall
+      j = TAB_CONTACT(i)%an - (n_bodies - n_wall)
+
+      ! The force vector
+      f_vec = TAB_CONTACT(i)%rn*TAB_CONTACT(i)%n_frame + TAB_CONTACT(i)%rt*TAB_CONTACT(i)%t_frame
+      array_wall(j,1) = array_wall(j,1) + f_vec(1)
+      array_wall(j,2) = array_wall(j,2) + f_vec(2)
+    end if 
+  end do
+
+  ! Writing in the file
+  write(102,'(1X,E12.5)', advance='no') time
+  do i=1, n_wall-1
+    write(102,'(2(1X,E12.5))', advance='no') array_wall(i,1), array_wall(i,2) 
+  end do
+  write(102,'(2(1X,E12.5))') array_wall(n_wall,1), array_wall(n_wall,2) 
+
+  if (i_ == last_) then
+    close(102)
+  end if
+  ! General info
+  print*, 'Write walls forces            ---> Ok!'
+end subroutine walls_frc
+
+!==============================================================================
+! Computing the solid fraction
+!==============================================================================
+subroutine compacity(i_, init_, last_)
   
-!   real(kind=8)                             :: Area_grain,Area_total
-!   integer                                  :: i
+  implicit none
+
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i
+  real(kind=8)                             :: v_solid, v_total
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=103,file='./POSTPRO/COMPACITY.DAT',status='replace')
+    write(103,*) '#   time     ','   height    ', '   width    ', '    V_s/V    '
+  end if
+
+  ! Computing the solid volume of grains
+  v_solid = 0
   
-!   Area_grain = 0.D0
+  do i=1,n_bodies
+    v_solid = v_solid + TAB_BODIES(i)%area
+  end do
   
-!   do i=1,n_particles
-!     Area_grain = Area_grain + TAB_POLYG(i)%Area
-!   end do
+  ! Computing the total volume of the box
+  v_total = box_width * box_height
   
-!   Area_total = width * height
+  ! Writing
+  write(103,'(6(1X,E12.5))') time, box_height, box_width, v_solid/v_total
   
-!   if(first_over_all) then
-!     write(102,*) '#   time     ', '   height    ', '   width    ', '    V_s/V    '
-!   endif
+  if (i_ == last_) then
+    close(103)
+  end if
+
+  ! General info
+  print*, 'Write compacity               ---> Ok!'
   
-!   write(102,'(6(1X,E12.5))') time, height, width, Area_grain/Area_total
-  
-!   print*, 'Write Compacity                 ---> Ok!'
-  
-! end subroutine compacity
+end subroutine compacity
 
 
 ! !==============================================================================
