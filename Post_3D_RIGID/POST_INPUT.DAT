@@ -1,0 +1,18 @@
+# Functions to be computed:
+FRAMES                       :
+all                          : Options: All. Or the range of frames in two separated lines
+WALLS POSITION               :
+PACKING FRACTION             :
+#ECCENTRICITY                 :
+#SPHERICITY                   :
+#ANGULARITY                   :
+#WALLS FORCES                 :
+#COMPACITY                    :
+#QoverP                       :
+#COORDINATION                 :
+#CONTACTS ORIENTATION         :
+#ANISOTROPY CONTACT           :
+#ANISOTROPY FORCE             :
+#GRAIN SIZE DISTRIB           :
+#CONTACT NUMBER PROBABILITY   :
+#DRAW                         :
