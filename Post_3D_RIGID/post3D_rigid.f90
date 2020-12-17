@@ -461,7 +461,18 @@ subroutine box_size
       y_max = max(y_max,TAB_BODIES(i)%center(2) + TAB_BODIES(i)%radius)
       z_min = min(z_min,TAB_BODIES(i)%center(3) - TAB_BODIES(i)%radius)
       z_max = max(z_max,TAB_BODIES(i)%center(3) + TAB_BODIES(i)%radius)
+    
     end if
+    
+    if (TAB_BODIES(i)%shape == 'POLYR') then
+      x_min = min(x_min,TAB_BODIES(i)%center(1) - TAB_BODIES(i)%radius)
+      x_max = max(x_max,TAB_BODIES(i)%center(1) + TAB_BODIES(i)%radius)
+      y_min = min(y_min,TAB_BODIES(i)%center(2) - TAB_BODIES(i)%radius)
+      y_max = max(y_max,TAB_BODIES(i)%center(2) + TAB_BODIES(i)%radius)
+      z_min = min(z_min,TAB_BODIES(i)%center(3) - TAB_BODIES(i)%radius)
+      z_max = max(z_max,TAB_BODIES(i)%center(3) + TAB_BODIES(i)%radius)
+    
+    !end if
 
 !     In case of clusters
 !    if (TAB_BODIES(i)%shape == 'clusx') then
@@ -481,7 +492,7 @@ subroutine box_size
 !      x_max = max(x_max,TAB_BODIES(i)%center_c2(1) + TAB_BODIES(i)%radius_c2)
 !      y_min = min(y_min,TAB_BODIES(i)%center_c2(2) - TAB_BODIES(i)%radius_c2)
 !      y_max = max(y_max,TAB_BODIES(i)%center_c2(2) + TAB_BODIES(i)%radius_c2)
-!    end if
+    end if
   end do
 
   box_length = x_max - x_min
@@ -497,7 +508,7 @@ subroutine read_bodies
 
   implicit none
   
-  integer                                  ::  i, j , error, n_vertex, n_faces
+  integer                                  ::  i, j , error, n_vertex, n_faces, avoidI
   real(kind=8)                             ::  radius, ax1, ax2, ax3
   !real(kind=8)                             ::  radius_c1, radius_c2
   real(kind=8), dimension(3)               ::  curr_center
@@ -506,6 +517,7 @@ subroutine read_bodies
   character(len=20)                        ::  clout_Bodies
   character(len=5)                         ::  text5
   character(len=6)                         ::  text6
+  character                                ::  avoid1, avoid2, avoid3, avoid4, avoid5
   
   ! File name 
   clout_Bodies = './OUTBOX/BODIES.OUT'
@@ -542,9 +554,12 @@ subroutine read_bodies
         ! We go back one line to RE-read the number of vertex
         backspace(2)
         ! Reading
-        read(2,'(40X, i6)') n_vertex
-        read(2,'(58X, i6)') n_faces
-        do i=1, n_vertex+n_faces
+        read(2,*) avoid1, avoidI, avoid2, avoid3, avoid4, n_vertex, avoid5, n_faces
+        print*, n_vertex, n_faces
+        do i=1, n_vertex
+          read(2,*) ! Skipping lines
+        end do
+        do i=1, n_faces                                                                                                                                                                                                    
           read(2,*) ! Skipping lines
         end do 
         ! Checking if this is a cluster with DISKb
@@ -619,8 +634,7 @@ subroutine read_bodies
         ! We go back one line to RE-read the number of vertex
         backspace(2)
         ! Reading
-        read(2,'(40X, i6)') n_vertex
-        read(2,'(58X, i6)') n_faces
+        read(2,*) avoid1, avoidI, avoid2, avoid3, avoid4, n_vertex, avoid5, n_faces
         ! Allocating vertex space
         if (allocated(vertices)) deallocate(vertices)
         if (allocated(TAB_BODIES(i)%vertex)) deallocate(TAB_BODIES(i)%vertex)
@@ -633,6 +647,7 @@ subroutine read_bodies
         ! Reading the vertices
         do j=1, n_vertex
           read(2,'(29X, 3(5x,D14.7,2X))') vertices(j,1), vertices(j,2), vertices(j,3)
+          !print*, vertices(j,1), vertices(j,2), vertices(j,3)
         end do 
 
         ! Allocating connec space
@@ -644,7 +659,8 @@ subroutine read_bodies
 
         ! Reading the connect
         do j=1, n_faces
-          read(2,'(29X, 3(5x,D14.7,2X))') connect(j,1), connect(j,2), connect(j,3)
+          read(2, *) avoid1, connect(j,1), avoid2, connect(j,2), avoid3, connect(j,3)
+          !print*, connect(j,1), connect(j,2), connect(j,3)
         end do 
 
         ! Checking if this is a cluster with DISKb
@@ -682,6 +698,7 @@ subroutine read_bodies
         TAB_BODIES(i)%shape = 'POLYR'
         TAB_BODIES(i)%radius = radius
         TAB_BODIES(i)%center_ref = curr_center
+        TAB_BODIES(i)%vol = 4./3.*pi*radius**3
         TAB_BODIES(i)%n_vertex = n_vertex
         TAB_BODIES(i)%n_faces = n_faces
         TAB_BODIES(i)%vertex = vertices
@@ -1349,7 +1366,7 @@ subroutine pack_frac(i_, init_, last_)
   ! If this is the first time, we open the file and write the heading
   if (i_ == init_) then
     open (unit=102,file='./POSTPRO/PACK_FRAC.DAT',status='replace')
-    write(103,'(A)',advance='no') '#   time     ','   height    ', '   width    ', '   length    ','    V_s/V    '
+    write(102,'(A)') '# time         height       width        length       V_s/V    '
   end if
 
   ! Computing the solid volume of grains
@@ -1363,10 +1380,10 @@ subroutine pack_frac(i_, init_, last_)
   v_total = box_width * box_height * box_length
   
   ! Writing
-  write(102,'(7(1X,E12.5))') time, box_height, box_width, box_length, v_solid/v_total, v_solid, v_total
+  write(102,'(7(1X,E12.5))') time, box_height, box_width, box_length, v_solid/v_total
   
   if (i_ == last_) then
-    close(103)
+    close(102)
   end if
 
   ! General info
