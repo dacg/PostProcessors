@@ -5,6 +5,8 @@ WALLS POSITION               :
 WALLS FORCES                 :
 COMPACITY                    :
 QoverP                       :
+PERIODIC                     : 
+1                            : Periodic length
 #COORDINATION                 :
 #CONTACTS ORIENTATION         :
 #ANISOTROPY CONTACT           :

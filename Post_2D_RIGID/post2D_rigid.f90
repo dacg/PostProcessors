@@ -14,7 +14,7 @@ type  ::  T_BODY
   real(kind=8)                             ::  radius, area, rot
   real(kind=8),dimension(2)                ::  center_ref, center
   real(kind=8),dimension(3)                ::  veloc
-  character(len=5)                         ::  shape ! It can be: 'diskx', 'polyx', 'clusx'
+  character(len=5)                         ::  shape ! It can be: 'diskx', 'polyx', 'clusx', 'wallx', 'pt2dx'
 
   ! Info for polyg or clusters
   integer                                  ::  n_vertex
@@ -25,6 +25,9 @@ type  ::  T_BODY
 
   ! Info for walls
   real(kind=8)                             ::  ax1, ax2
+
+  ! Info concerning contacts
+  integer                                  ::  n_ctc
 end type T_BODY
 
 
@@ -41,15 +44,15 @@ type  ::  T_CONTACT
 end type T_CONTACT
 
 type(T_BODY),allocatable,dimension(:)       ::  TAB_BODIES
-type(T_CONTACT),allocatable,dimension(:)    ::  TAB_CONTACT_RAW
-type(T_CONTACT),allocatable,dimension(:)    ::  TAB_CONTACT
+type(T_CONTACT),allocatable,dimension(:)    ::  TAB_CONTACTS_RAW
+type(T_CONTACT),allocatable,dimension(:)    ::  TAB_CONTACTS
 
 !Definitions
 !================================================
 integer                                     ::  n_wall=0, n_bodies=0
-integer                                     ::  n_disk=0, n_polyg=0, n_cluster=0, n_pt2x=0
+integer                                     ::  n_disk=0, n_polyg=0, n_cluster=0, n_pt2d=0
 integer                                     ::  init_frame, last_frame 
-integer                                     ::  n_dkdk=0, n_plpl=0, n_dkjc=0, n_pljc=0, n_dkpl
+integer                                     ::  n_dkdk=0, n_plpl=0, n_dkjc=0, n_pljc=0, n_dkpl=0, n_ptpt=0
 integer                                     ::  n_simple=0,n_double=0, n_contacts=0, n_contacts_raw=0
 integer                                     ::  except, ii, step
 real(kind=8)                                ::  time
@@ -62,12 +65,17 @@ real(kind=8)                               ::  box_height, box_width
 !================================================
 character(len=30)                          ::  command
 integer                                    ::  c_coordination=0, c_compacity=0, c_qoverp=0, c_ctc_anisotropy=0, &
-                                               c_frc_anisotropy=0, c_brc_anisotropy=0, c_grain_dize_dist=0, & 
+                                               c_frc_anisotropy=0, c_brc_anisotropy=0, c_granulo=0, & 
                                                c_walls_pos=0, c_walls_frc = 0, c_contact_dir = 0, c_brc_dir=0, c_frc_dir=0, &
                                                c_nctc_probability=0, c_frc_list=0, option_cohe=0, c_fail_mode=0,  &
                                                c_list_interact=0, c_sign_aniso=0, c_clean_tresca=0, c_multi_part_frac=0, &
                                                c_avg_shape_ratio=0, c_sign_aniso_l=0, c_list_interact_l = 0, c_ctc_dir_l=0, & 
                                                c_brc_dir_l=0, c_frc_dir_l=0, c_draw_vtk = 0
+
+! Flag list
+!================================================
+integer                                   ::  flag_periodic=0
+real(kind=8)                              ::  l_periodic=0
 
 !Variables DavidC.
 integer, dimension(:), allocatable         ::  t_failure
@@ -117,6 +125,12 @@ do
     cycle
   end if
 
+  if (command=='PERIODIC                     :') then
+    flag_periodic=1
+    read(1,*) l_periodic
+    cycle
+  end if
+
   if (command=='WALLS POSITION               :') then
     print*, command
     c_walls_pos=1
@@ -145,17 +159,37 @@ do
     cycle
   end if
   
-  ! if (command=='COORDINATION                 :') then
-  !   c__coordination=1
-  !   open (unit=100,file='./POSTPRO/COORDINATION.DAT',status='replace')
-  !   cycle
-  ! end if
-  
-  ! if (command=='GRAIN SIZE DISTRIB           :') then
-  !   calcul_granulo=1
-  !   cycle
-  ! end if
+  if (command=='COORDINATION                 :') then
+    print*, command
+    c_coordination=1
+    ! Uses port 105
+    cycle
+  end if
 
+  if (command=='ANISOTROPY CONTACT           :') then
+    print*, command
+    c_ctc_anisotropy=1
+    ! Uses port 106
+    cycle
+  end if
+
+  if (command=='ANISOTROPY BRANCH            :') then
+    c_brc_anisotropy=1
+    ! Uses port 107
+    cycle
+  end if
+
+  if (command=='ANISOTROPY FORCE             :') then
+    c_frc_anisotropy=1
+    ! Uses port 108
+    cycle
+  end if
+
+  if (command=='GRAIN SIZE DISTRIB           :') then
+    c_granulo=1
+    ! Uses port 109
+    cycle
+  end if
   
   ! if (command=='MULTIPART FRAG               :') then
   !   c_multi_part_frac = 1
@@ -165,24 +199,6 @@ do
   ! if (command=='VITESSE MOYENNE              :') then
   !   calcul_vitesse_moyenne=1
   !   open (unit=101,file='./POSTPRO/VITESSE_MOYENNE.DAT',status='replace')
-  !   cycle
-  ! end if
-  
-  ! if (command=='ANISOTROPY CONTACT           :') then
-  !   calcul_anisotropy_contact=1
-  !   open (unit=104,file='./POSTPRO/ANISOTROPY_CONTACT.DAT',status='replace')
-  !   cycle
-  ! end if
-  
-  ! if (command=='ANISOTROPY FORCE             :') then
-  !   calcul_anisotropy_force=1
-  !   open (unit=105,file='./POSTPRO/ANISOTROPY_FORCE.DAT',status='replace')
-  !   cycle
-  ! end if
-  
-  ! if (command=='ANISOTROPY BRANCH            :') then
-  !   calcul_anisotropy_branch=1
-  !   open (unit=106,file='./POSTPRO/ANISOTROPY_BRANCH.DAT',status='replace')
   !   cycle
   ! end if
   
@@ -303,7 +319,12 @@ end do
 ! Initializing bodies
 call read_bodies
 
+! One time subroutines
+!======================
+if (c_granulo         == 1)  call granulo
+
 ! Analysing the frames
+!======================
 do ii=init_frame, last_frame
 
   ! General info
@@ -322,15 +343,16 @@ do ii=init_frame, last_frame
   if (c_walls_pos              == 1)  call walls_pos(ii,init_frame,last_frame)
   if (c_walls_frc              == 1)  call walls_frc(ii,init_frame,last_frame)
   if (c_compacity              == 1)  call compacity(ii,init_frame,last_frame)
-  !if (c_qoverp                 == 1)  call qoverp(ii,init_frame,last_frame)
+  if (c_qoverp                 == 1)  call qoverp(ii,init_frame,last_frame)
+  if (c_coordination           == 1)  call coordination(ii,init_frame,last_frame)
+  if (c_ctc_anisotropy         == 1)  call ctc_anisotropy(ii,init_frame,last_frame)
+  if (c_brc_anisotropy         == 1)  call brc_anisotropy(ii,init_frame,last_frame)
+  if (c_frc_anisotropy         == 1)  call frc_anisotropy(ii,init_frame,last_frame)
 
 !     if (calcul_coordination         == 1)  call nb_coordination
 !     if (calcul_granulo              == 1)  call granulometry
 !     if (contact_dir                 == 1)  call contact_direction
 !     if (calcul_vitesse_moyenne      == 1)  call vitesse_moyenne
-!     if (calcul_anisotropy_contact   == 1)  call anisotropy_contact
-!     if (calcul_anisotropy_force     == 1)  call anisotropy_force
-!     if (calcul_anisotropy_branch    == 1)  call anisotropy_branch
 !     if (calcul_persiste_contact     == 1)  call persiste_contact
 !     if (c_n_ctc_probability         == 1)  call ctc_probability
 !     if (c_f_list                    == 1)  call f_list
@@ -352,6 +374,9 @@ end do
 !==============================================================================
 ! The functions
 contains
+
+  ! Including externals for the computation of eigenvalues and eigenvectors
+  include 'externals.f90'
 
 !==============================================================================
 ! Function that counts the number of files to be analized in case of 'all'
@@ -420,6 +445,7 @@ subroutine box_size
   do i=1, n_bodies
     ! Omiting walls
     if (TAB_BODIES(i)%shape == 'wallx') cycle
+    if (TAB_BODIES(i)%shape == 'pt2dx') cycle
 
     ! In case of disks, we check with the radius
     if (TAB_BODIES(i)%shape == 'diskx') then
@@ -447,6 +473,16 @@ subroutine box_size
       x_max = max(x_max,TAB_BODIES(i)%center_c2(1) + TAB_BODIES(i)%radius_c2)
       y_min = min(y_min,TAB_BODIES(i)%center_c2(2) - TAB_BODIES(i)%radius_c2)
       y_max = max(y_max,TAB_BODIES(i)%center_c2(2) + TAB_BODIES(i)%radius_c2)
+    end if
+
+    ! In case of polygons
+    if (TAB_BODIES(i)%shape == 'polyx') then
+      do j=1, TAB_BODIES(i)%n_vertex
+        x_min = min(x_min,TAB_BODIES(i)%vertex(j,1))
+        x_max = max(x_max,TAB_BODIES(i)%vertex(j,1))
+        y_min = min(y_min,TAB_BODIES(i)%vertex(j,2))
+        y_max = max(y_max,TAB_BODIES(i)%vertex(j,2))
+      end do
     end if
   end do
 
@@ -500,7 +536,12 @@ subroutine read_bodies
       read(2,'(1X,A5)') text5
       ! The case this is a disk
       if (text5 == 'DISKx') then 
-        n_disk = n_disk + 1
+        read(2,'(1X,A5)') text5
+        if (text5 == 'PT2Dx') then
+          n_pt2d = n_pt2d + 1
+        else 
+          n_disk = n_disk + 1
+        end if
       ! The this is a polyg or a cluster
       else if (text5 == 'POLYG') then
         ! We go back one line to RE-read the number of vertex
@@ -533,9 +574,10 @@ subroutine read_bodies
   print*, 'Number of polyg:   ', n_polyg
   print*, 'Number of cluster: ', n_cluster
   print*, 'Number of walls:   ', n_wall
+  print*, 'Number of ptpt2:   ', n_pt2d
 
   ! Defining the total number of particles
-  n_bodies = n_disk + n_polyg + n_cluster + n_wall
+  n_bodies = n_disk + n_polyg + n_cluster + n_wall + n_pt2d
 
   ! Allocating the tables
   if (allocated(TAB_BODIES)) deallocate(TAB_BODIES)
@@ -568,8 +610,13 @@ subroutine read_bodies
 
       ! The case this is a disk
       if (text5 == 'DISKx') then
-        ! Loading the info
-        TAB_BODIES(i)%shape = 'diskx'
+        read(2,'(1X,A5)') text5
+        if (text5 == 'PT2Dx') then
+          TAB_BODIES(i)%shape = 'pt2dx'
+        else 
+          TAB_BODIES(i)%shape = 'diskx'
+        end if
+
         TAB_BODIES(i)%radius = radius
         TAB_BODIES(i)%center_ref = curr_center
         TAB_BODIES(i)%area = pi*radius**2
@@ -633,13 +680,12 @@ subroutine read_bodies
           TAB_BODIES(i)%n_vertex = n_vertex
 
           ! Computing the area of this polygon
-
           do j=1,n_vertex-2
             TAB_BODIES(i)%area = TAB_BODIES(i)%area + &
-                        0.5*(((vertices(1,j+1) - vertices(1,1)) &
-                           *  (vertices(2,j+2) - vertices(2,1))) &
-                           - ((vertices(2,j+1) - vertices(2,1)) &
-                           *  (vertices(1,j+2) - vertices(1,1))))
+                                 0.5*(((vertices(j+1,1) - vertices(1,1)) &
+                                    *  (vertices(j+2,2) - vertices(1,2))) &
+                                    - ((vertices(j+1,2) - vertices(1,2)) &
+                                    *  (vertices(j+2,1) - vertices(1,1))))
           end do
         end if
       end if
@@ -697,7 +743,7 @@ subroutine update_bodies(i_)
   read(2,*) ! Skippable line
   read(2,*) ! Skippable line
   read(2,*) ! Skippable line
-  read(2,'(7X,i8,19X,D14.7)') step, time
+  read(2,'(7X,8X,19X,D14.7)') time
 
   ! Body counter
   i = 0
@@ -750,17 +796,20 @@ subroutine update_bodies(i_)
         TAB_BODIES(i)%center_c1(1) = TAB_BODIES(i)%center_ref_c1(1) * cos(rot) - &
                                      TAB_BODIES(i)%center_ref_c1(2) * sin(rot) + &
                                      TAB_BODIES(i)%center(1)
-        TAB_BODIES(i)%center_c1(2) = TAB_BODIES(i)%center_ref_c1(1) * cos(rot) + &
-                                     TAB_BODIES(i)%center_ref_c1(2) * sin(rot) + &
+        TAB_BODIES(i)%center_c1(2) = TAB_BODIES(i)%center_ref_c1(1) * sin(rot) + &
+                                     TAB_BODIES(i)%center_ref_c1(2) * cos(rot) + &
                                      TAB_BODIES(i)%center(2)
         TAB_BODIES(i)%center_c2(1) = TAB_BODIES(i)%center_ref_c2(1) * cos(rot) - &
                                      TAB_BODIES(i)%center_ref_c2(2) * sin(rot) + &
                                      TAB_BODIES(i)%center(1)
-        TAB_BODIES(i)%center_c2(2) = TAB_BODIES(i)%center_ref_c2(1) * cos(rot) + &
-                                     TAB_BODIES(i)%center_ref_c2(2) * sin(rot) + &
+        TAB_BODIES(i)%center_c2(2) = TAB_BODIES(i)%center_ref_c2(1) * sin(rot) + &
+                                     TAB_BODIES(i)%center_ref_c2(2) * cos(rot) + &
                                      TAB_BODIES(i)%center(2)
       end if
-    end if 
+    end if
+
+    ! General initialization of the number of interacions per body
+    TAB_BODIES(:)%n_ctc = 0.
   end do 
 end subroutine update_bodies
 
@@ -803,6 +852,7 @@ subroutine read_contacts(i_)
   n_dkpl = 0
   n_dkjc = 0
   n_pljc = 0
+  n_ptpt = 0
 
   ! Reading the Vloc_Rloc.OUT.i_
   ! This is a pre-reading to count the number of contacts
@@ -840,18 +890,20 @@ subroutine read_contacts(i_)
       n_pljc = n_pljc + 1
     else if (text13 == '$icdan  DKPLx') then
       n_dkpl = n_dkpl + 1
+    else if (text13 == '$icdan  PTPT2') then
+      n_ptpt = n_ptpt + 1
     end if
   end do
 
   ! Total number of raw contacts
-  n_contacts_raw = n_dkdk + n_plpl + n_dkpl + n_dkjc + n_pljc
+  n_contacts_raw = n_dkdk + n_plpl + n_dkpl + n_dkjc + n_pljc + n_ptpt
 
   ! Genaral information
   print*, 'Total number of raw interactions:', n_contacts_raw
 
   ! Allocating the corresponding space for the number of contacts
-  if (allocated(TAB_CONTACT_RAW)) deallocate(TAB_CONTACT_RAW)
-  allocate(TAB_CONTACT_RAW(n_contacts_raw))
+  if (allocated(TAB_CONTACTS_RAW)) deallocate(TAB_CONTACTS_RAW)
+  allocate(TAB_CONTACTS_RAW(n_contacts_raw))
 
   ! Rewinding file
   rewind(2)
@@ -890,8 +942,11 @@ subroutine read_contacts(i_)
         read(2,'(8X,i5,23X,i5,2X,A5,9X,i5,30X,A5,2X,i5)')       cd, l_ver, i_law, an, status, iadj
       else if (text5 == 'DKPLx') then
         read(2,'(8X,i5,16X,A5,9x,i5,23X,i5,16X,A5,2X,i5)')      cd, i_law, an, l_ver, status, iadj
+      else if (text5 == 'PTPT2') then
+        read(2,'(8X,i5,16X,A5,9x,i5,16X,A5,2X,i5)')             cd, i_law, an, status, iadj
       else 
         print*, 'Unknown contact type'
+        print*, text5
         stop
       end if 
 
@@ -901,32 +956,32 @@ subroutine read_contacts(i_)
       read(2,'(29X, 2(5x,D14.7,2X))') n_frame(1), n_frame(2)
       read(2,'(29X, 2(5x,D14.7,2X))') coor_ctc(1), coor_ctc(2)
 
-      TAB_CONTACT_RAW(i)%id = id
-      TAB_CONTACT_RAW(i)%cd=cd
-      TAB_CONTACT_RAW(i)%an=an
-      TAB_CONTACT_RAW(i)%n_frame=n_frame
-      TAB_CONTACT_RAW(i)%t_frame(1)=n_frame(2)
-      TAB_CONTACT_RAW(i)%t_frame(2)=-n_frame(1)
-      TAB_CONTACT_RAW(i)%coor_ctc=coor_ctc
-      TAB_CONTACT_RAW(i)%rn=rn
-      TAB_CONTACT_RAW(i)%rt=rt
-      TAB_CONTACT_RAW(i)%n_interact = 0
-      TAB_CONTACT_RAW(i)%i_law = i_law
-      TAB_CONTACT_RAW(i)%nature = text5
+      TAB_CONTACTS_RAW(i)%id = id
+      TAB_CONTACTS_RAW(i)%cd=cd
+      TAB_CONTACTS_RAW(i)%an=an
+      TAB_CONTACTS_RAW(i)%n_frame=n_frame
+      TAB_CONTACTS_RAW(i)%t_frame(1)=n_frame(2)
+      TAB_CONTACTS_RAW(i)%t_frame(2)=-n_frame(1)
+      TAB_CONTACTS_RAW(i)%coor_ctc=coor_ctc
+      TAB_CONTACTS_RAW(i)%rn=rn
+      TAB_CONTACTS_RAW(i)%rt=rt
+      TAB_CONTACTS_RAW(i)%n_interact = 0
+      TAB_CONTACTS_RAW(i)%i_law = i_law
+      TAB_CONTACTS_RAW(i)%nature = text5
 
-      TAB_CONTACT_RAW(i)%iadj = iadj
+      TAB_CONTACTS_RAW(i)%iadj = iadj
 
       if (text5 == 'PLPLx') then
-        TAB_CONTACT_RAW(i)%l_ver = l_ver
-        TAB_CONTACT_RAW(i)%l_seg = l_seg
+        TAB_CONTACTS_RAW(i)%l_ver = l_ver
+        TAB_CONTACTS_RAW(i)%l_seg = l_seg
       end if
 
       if (text5 == 'PLJCx') then
-        TAB_CONTACT_RAW(i)%l_ver = l_ver
+        TAB_CONTACTS_RAW(i)%l_ver = l_ver
       end if
 
       if (text5 == 'DKPLx') then
-        TAB_CONTACT_RAW(i)%l_ver = l_ver
+        TAB_CONTACTS_RAW(i)%l_ver = l_ver
       end if
     end If
   end do
@@ -937,14 +992,14 @@ subroutine read_contacts(i_)
   
   ! It's necessary to define the type of contact (i.e., simple or double)
   do i=1,n_contacts_raw-1
-    if (TAB_CONTACT_RAW(i)%n_interact>0) cycle
-    if ((TAB_CONTACT_RAW(i)%cd == TAB_CONTACT_RAW(i+1)%cd) .and. &
-        (TAB_CONTACT_RAW(i)%an == TAB_CONTACT_RAW(i+1)%an)) then
-        TAB_CONTACT_RAW(i)%n_interact=2
-        TAB_CONTACT_RAW(i+1)%n_interact=2
+    if (TAB_CONTACTS_RAW(i)%n_interact>0) cycle
+    if ((TAB_CONTACTS_RAW(i)%cd == TAB_CONTACTS_RAW(i+1)%cd) .and. &
+        (TAB_CONTACTS_RAW(i)%an == TAB_CONTACTS_RAW(i+1)%an)) then
+        TAB_CONTACTS_RAW(i)%n_interact=2
+        TAB_CONTACTS_RAW(i+1)%n_interact=2
         n_double = n_double + 1
     else
-      TAB_CONTACT_RAW(i)%n_interact=1
+      TAB_CONTACTS_RAW(i)%n_interact=1
       n_simple = n_simple + 1
     end if
   end do
@@ -956,51 +1011,63 @@ subroutine read_contacts(i_)
   j = 0
 
   ! Allocating a new table
-  if (allocated(TAB_CONTACT)) deallocate(TAB_CONTACT)
-  allocate(TAB_CONTACT(n_contacts))
+  if (allocated(TAB_CONTACTS)) deallocate(TAB_CONTACTS)
+  allocate(TAB_CONTACTS(n_contacts))
 
   if (n_contacts .lt. n_contacts_raw) then
     do i=1,n_contacts_raw
       ! In the case of a simple contact... we copy the info
-      if (TAB_CONTACT_RAW(i)%n_interact==1) then
+      if (TAB_CONTACTS_RAW(i)%n_interact==1) then
         j = j +1
-        TAB_CONTACT(j)%cd         = TAB_CONTACT_RAW(i)%cd
-        TAB_CONTACT(j)%an         = TAB_CONTACT_RAW(i)%an
-        TAB_CONTACT(j)%n_frame    = TAB_CONTACT_RAW(i)%n_frame
-        TAB_CONTACT(j)%t_frame    = TAB_CONTACT_RAW(i)%t_frame
-        TAB_CONTACT(j)%coor_ctc   = TAB_CONTACT_RAW(i)%coor_ctc
-        TAB_CONTACT(j)%rn         = TAB_CONTACT_RAW(i)%rn
-        TAB_CONTACT(j)%rt         = TAB_CONTACT_RAW(i)%rt
-        TAB_CONTACT(j)%nature     = TAB_CONTACT_RAW(i)%nature
-        TAB_CONTACT(j)%n_interact = 1
-        TAB_CONTACT(j)%status     = TAB_CONTACT_RAW(i)%status
+        TAB_CONTACTS(j)%cd         = TAB_CONTACTS_RAW(i)%cd
+        TAB_CONTACTS(j)%an         = TAB_CONTACTS_RAW(i)%an
+        TAB_CONTACTS(j)%n_frame    = TAB_CONTACTS_RAW(i)%n_frame
+        TAB_CONTACTS(j)%t_frame    = TAB_CONTACTS_RAW(i)%t_frame
+        TAB_CONTACTS(j)%coor_ctc   = TAB_CONTACTS_RAW(i)%coor_ctc
+        TAB_CONTACTS(j)%rn         = TAB_CONTACTS_RAW(i)%rn
+        TAB_CONTACTS(j)%rt         = TAB_CONTACTS_RAW(i)%rt
+        TAB_CONTACTS(j)%nature     = TAB_CONTACTS_RAW(i)%nature
+        TAB_CONTACTS(j)%n_interact = 1
+        TAB_CONTACTS(j)%status     = TAB_CONTACTS_RAW(i)%status
+
+        ! Counting the number of active contacts per body
+        if (abs(TAB_CONTACTS(j)%rn) .gt. 1D-8) then
+          TAB_BODIES(cd)%n_ctc = TAB_BODIES(cd)%n_ctc + 1
+          TAB_BODIES(an)%n_ctc = TAB_BODIES(an)%n_ctc + 1
+        end if
       end if
-      if (TAB_CONTACT_RAW(i)%n_interact==2) then
+      if (TAB_CONTACTS_RAW(i)%n_interact==2) then
         if (first_double) then
-          coor_ctc_temp = TAB_CONTACT_RAW(i)%coor_ctc
-          rn_temp        = TAB_CONTACT_RAW(i)%rn
-          rt_temp        = TAB_CONTACT_RAW(i)%rt
+          coor_ctc_temp = TAB_CONTACTS_RAW(i)%coor_ctc
+          rn_temp        = TAB_CONTACTS_RAW(i)%rn
+          rt_temp        = TAB_CONTACTS_RAW(i)%rt
           first_double   = .false.
-          gap_temp       = TAB_CONTACT_RAW(i)%gap
+          gap_temp       = TAB_CONTACTS_RAW(i)%gap
           cycle
         else if (.not. first_double) then
           j = j+1
-          TAB_CONTACT(j)%cd           = TAB_CONTACT_RAW(i)%cd
-          TAB_CONTACT(j)%an           = TAB_CONTACT_RAW(i)%an
-          TAB_CONTACT(j)%n_frame      = TAB_CONTACT_RAW(i)%n_frame
-          TAB_CONTACT(j)%t_frame      = TAB_CONTACT_RAW(i)%t_frame
-          TAB_CONTACT(j)%coor_ctc     = (TAB_CONTACT_RAW(i)%coor_ctc + coor_ctc_temp)/2
-          TAB_CONTACT(j)%gap          = (TAB_CONTACT_RAW(i)%gap + gap_temp)/2
-          TAB_CONTACT(j)%rn           = TAB_CONTACT_RAW(i)%rn + rn_temp
-          TAB_CONTACT(j)%rt           = TAB_CONTACT_RAW(i)%rt + rt_temp
-          TAB_CONTACT(j)%nature       = TAB_CONTACT_RAW(i)%nature
-          TAB_CONTACT(j)%n_interact   = 2
-          first_double                                          = .true.
+          TAB_CONTACTS(j)%cd           = TAB_CONTACTS_RAW(i)%cd
+          TAB_CONTACTS(j)%an           = TAB_CONTACTS_RAW(i)%an
+          TAB_CONTACTS(j)%n_frame      = TAB_CONTACTS_RAW(i)%n_frame
+          TAB_CONTACTS(j)%t_frame      = TAB_CONTACTS_RAW(i)%t_frame
+          TAB_CONTACTS(j)%coor_ctc     = (TAB_CONTACTS_RAW(i)%coor_ctc + coor_ctc_temp)/2
+          TAB_CONTACTS(j)%gap          = (TAB_CONTACTS_RAW(i)%gap + gap_temp)/2
+          TAB_CONTACTS(j)%rn           = TAB_CONTACTS_RAW(i)%rn + rn_temp
+          TAB_CONTACTS(j)%rt           = TAB_CONTACTS_RAW(i)%rt + rt_temp
+          TAB_CONTACTS(j)%nature       = TAB_CONTACTS_RAW(i)%nature
+          TAB_CONTACTS(j)%n_interact   = 2
+          first_double                 = .true.
+
+          ! Counting the number of active contacts per body
+          if (abs(TAB_CONTACTS(j)%rn) .gt. 1D-8) then
+            TAB_BODIES(cd)%n_ctc = TAB_BODIES(cd)%n_ctc + 1
+            TAB_BODIES(an)%n_ctc = TAB_BODIES(an)%n_ctc + 1
+          end if
         end if
       end if
     end do
   else if(n_contacts_raw == n_contacts) then
-    TAB_CONTACT = TAB_CONTACT_RAW
+    TAB_CONTACTS = TAB_CONTACTS_RAW
   else
     print*, 'Error in double contacts anaylsis'
     stop
@@ -1019,11 +1086,11 @@ subroutine read_contacts(i_)
 !       if (TAB_POLYG(i)%group == 0) then
 !         ! Lets check if its contacts have
 !         do j=1, nb_ligneCONTACT
-!           icdent = TAB_CONTACT(j)%icdent
-!           ianent = TAB_CONTACT(j)%ianent
+!           icdent = TAB_CONTACTS(j)%icdent
+!           ianent = TAB_CONTACTS(j)%ianent
 !           ! is it cohesive?
-!           if (TAB_CONTACT(j)%status(1:1) /= 'W') cycle
-!           if (TAB_CONTACT(j)%gap > 0.0001) cycle
+!           if (TAB_CONTACTS(j)%status(1:1) /= 'W') cycle
+!           if (TAB_CONTACTS(j)%gap > 0.0001) cycle
 !           ! if found as candidate
 !           if (icdent==i) then
 !             ! and the antagonist has a group
@@ -1050,11 +1117,11 @@ subroutine read_contacts(i_)
 !       if (TAB_POLYG(i)%group > 0) then
 !         ! And we loop looking for neighbors
 !         do j=1, nb_ligneCONTACT
-!           icdent = TAB_CONTACT(j)%icdent
-!           ianent = TAB_CONTACT(j)%ianent
+!           icdent = TAB_CONTACTS(j)%icdent
+!           ianent = TAB_CONTACTS(j)%ianent
 !           ! is it cohesive?
-!           if (TAB_CONTACT(j)%status(1:1) /= 'W') cycle
-!           if (TAB_CONTACT(j)%gap > 0.0001) cycle
+!           if (TAB_CONTACTS(j)%status(1:1) /= 'W') cycle
+!           if (TAB_CONTACTS(j)%gap > 0.0001) cycle
 !           ! if found as candidate
 !           if (icdent==i) then
 !             ! we change the antagonist
@@ -1073,23 +1140,23 @@ subroutine read_contacts(i_)
 !         TAB_POLYG(i)%group = n_groups
 !         ! And we loop again to change its neighbors
 !         do j=1, nb_ligneCONTACT
-!           icdent = TAB_CONTACT(j)%icdent
-!           ianent = TAB_CONTACT(j)%ianent
+!           icdent = TAB_CONTACTS(j)%icdent
+!           ianent = TAB_CONTACTS(j)%ianent
 !           ! is it cohesive?
-!           if (TAB_CONTACT(j)%status(1:1) /= 'W') cycle
-!           if (TAB_CONTACT(j)%gap > 0.0001) cycle
+!           if (TAB_CONTACTS(j)%status(1:1) /= 'W') cycle
+!           if (TAB_CONTACTS(j)%gap > 0.0001) cycle
 !           ! if found as candidate
 !           if (icdent==i) then
 !             ! we change the antagonist
 !             TAB_POLYG(ianent)%group = TAB_POLYG(icdent)%group
 !             ! Look for neighbors of the neighbor
 !             do k=1, nb_ligneCONTACT
-!               if (TAB_CONTACT(k)%status(1:1) /= 'W') cycle
-!               if (TAB_CONTACT(k)%gap > 0.0001) cycle
-!               if (TAB_CONTACT(k)%icdent == ianent) then
-!                 TAB_POLYG(TAB_CONTACT(k)%icdent)%group = TAB_POLYG(ianent)%group
-!               else if (TAB_CONTACT(j)%ianent == ianent) then
-!                 TAB_POLYG(TAB_CONTACT(k)%ianent)%group = TAB_POLYG(ianent)%group
+!               if (TAB_CONTACTS(k)%status(1:1) /= 'W') cycle
+!               if (TAB_CONTACTS(k)%gap > 0.0001) cycle
+!               if (TAB_CONTACTS(k)%icdent == ianent) then
+!                 TAB_POLYG(TAB_CONTACTS(k)%icdent)%group = TAB_POLYG(ianent)%group
+!               else if (TAB_CONTACTS(j)%ianent == ianent) then
+!                 TAB_POLYG(TAB_CONTACTS(k)%ianent)%group = TAB_POLYG(ianent)%group
 !               end if
 !             end do
 !           ! if found as antagonist
@@ -1098,12 +1165,12 @@ subroutine read_contacts(i_)
 !             TAB_POLYG(icdent)%group = TAB_POLYG(ianent)%group
 !             ! Look for neighbors of the neighbor
 !             do k=1, nb_ligneCONTACT
-!               if (TAB_CONTACT(k)%status(1:1) /= 'W') cycle
-!               if (TAB_CONTACT(k)%gap > 0.0001) cycle
-!               if (TAB_CONTACT(k)%icdent == icdent) then
-!                 TAB_POLYG(TAB_CONTACT(k)%icdent)%group = TAB_POLYG(icdent)%group
-!               else if (TAB_CONTACT(j)%ianent == icdent) then
-!                 TAB_POLYG(TAB_CONTACT(k)%ianent)%group = TAB_POLYG(icdent)%group
+!               if (TAB_CONTACTS(k)%status(1:1) /= 'W') cycle
+!               if (TAB_CONTACTS(k)%gap > 0.0001) cycle
+!               if (TAB_CONTACTS(k)%icdent == icdent) then
+!                 TAB_POLYG(TAB_CONTACTS(k)%icdent)%group = TAB_POLYG(icdent)%group
+!               else if (TAB_CONTACTS(j)%ianent == icdent) then
+!                 TAB_POLYG(TAB_CONTACTS(k)%ianent)%group = TAB_POLYG(icdent)%group
 !               end if
 !             end do
 !           end if
@@ -1117,27 +1184,27 @@ subroutine read_contacts(i_)
 ! !      ! We start to look for this particle in the contact list 
 ! !      do j=1, nb_ligneCONTACT
 ! !        ! If we find it 
-! !        if(TAB_CONTACT(j)%icdent == i) then
+! !        if(TAB_CONTACTS(j)%icdent == i) then
 ! !          ! we ask it is cohesive  
-! !          if (TAB_CONTACT(j)%status(1:1) == 'W') then
+! !          if (TAB_CONTACTS(j)%status(1:1) == 'W') then
 ! !            ! If its antagonist does not have already a group
-! !            if (TAB_POLYG(TAB_CONTACT(j)%ianent)%group == 0) then
+! !            if (TAB_POLYG(TAB_CONTACTS(j)%ianent)%group == 0) then
 ! !              ! We assign the group to the antagonist
-! !              TAB_POLYG(TAB_CONTACT(j)%ianent)%group = n_groups
+! !              TAB_POLYG(TAB_CONTACTS(j)%ianent)%group = n_groups
 ! !
 ! !            ! If its antagonist already has a group
 ! !            else
 ! !              ! We modify the current group
-! !              n_groups = TAB_POLYG(TAB_CONTACT(j)%ianent)%group
+! !              n_groups = TAB_POLYG(TAB_CONTACTS(j)%ianent)%group
 ! !              ! We reassign the group of the current particle
 ! !              TAB_POLYG(i)%group = n_groups
 ! !            end if 
 ! !            ! We look for other contacts including the antagonist 
 ! !            do k=j+1, nb_ligneCONTACT
-! !              if(TAB_CONTACT(k)%icdent == TAB_CONTACT(j)%ianent .or. TAB_CONTACT(k)%ianent == TAB_CONTACT(j)%ianent) then
-! !                if (TAB_CONTACT(k)%status(1:1) == 'W') then
-! !                  TAB_POLYG(TAB_CONTACT(k)%icdent)%group = n_groups
-! !                  TAB_POLYG(TAB_CONTACT(k)%ianent)%group = n_groups
+! !              if(TAB_CONTACTS(k)%icdent == TAB_CONTACTS(j)%ianent .or. TAB_CONTACTS(k)%ianent == TAB_CONTACTS(j)%ianent) then
+! !                if (TAB_CONTACTS(k)%status(1:1) == 'W') then
+! !                  TAB_POLYG(TAB_CONTACTS(k)%icdent)%group = n_groups
+! !                  TAB_POLYG(TAB_CONTACTS(k)%ianent)%group = n_groups
 ! !                end if
 ! !              end if
 ! !            end do
@@ -1149,11 +1216,11 @@ subroutine read_contacts(i_)
 ! !      ! We look for other contacts with this particle 
 ! !      do j=1, nb_ligneCONTACT
 ! !        ! If there it exits as candidate in the contact list 
-! !        if(TAB_CONTACT(j)%icdent == i) then
+! !        if(TAB_CONTACTS(j)%icdent == i) then
 ! !          ! If it is cohesive
-! !          if (TAB_CONTACT(j)%status(1:1) == 'W') then
+! !          if (TAB_CONTACTS(j)%status(1:1) == 'W') then
 ! !            ! We asign the group to the current antagonist
-! !            TAB_POLYG(TAB_CONTACT(j)%ianent)%group = TAB_POLYG(i)%group
+! !            TAB_POLYG(TAB_CONTACTS(j)%ianent)%group = TAB_POLYG(i)%group
 ! !          end if
 ! !        end if
 ! !      end do
@@ -1252,12 +1319,13 @@ subroutine walls_frc(i_, init_, last_)
 
   ! We look for interactions with walls
   do i=1, n_contacts
-    if (TAB_CONTACT(i)%nature == 'DKJCx' .or. TAB_CONTACT(i)%nature == 'PLJCx') then
+    if (TAB_CONTACTS(i)%nature == 'DKJCx' .or. TAB_CONTACTS(i)%nature == 'PLJCx') then
       ! Setting the correct id matching the number of wall
-      j = TAB_CONTACT(i)%an - (n_bodies - n_wall)
+      j = TAB_CONTACTS(i)%an - (n_bodies - n_wall - n_pt2d)
 
       ! The force vector
-      f_vec = TAB_CONTACT(i)%rn*TAB_CONTACT(i)%n_frame + TAB_CONTACT(i)%rt*TAB_CONTACT(i)%t_frame
+      f_vec = TAB_CONTACTS(i)%rn*TAB_CONTACTS(i)%n_frame + TAB_CONTACTS(i)%rt*TAB_CONTACTS(i)%t_frame
+
       array_wall(j,1) = array_wall(j,1) + f_vec(1)
       array_wall(j,2) = array_wall(j,2) + f_vec(2)
     end if 
@@ -1317,200 +1385,517 @@ subroutine compacity(i_, init_, last_)
 end subroutine compacity
 
 
-! !==============================================================================
-! ! Calculation of q/p
-! !==============================================================================
-! subroutine qoverp
+!==============================================================================
+! Computing the stress tensor and Q over P
+!==============================================================================
+ subroutine qoverp(i_, init_, last_)
   
-!   implicit none
-  
-!   integer                                  :: i,cd,an
-!   integer                                  :: ierror,matz,lda
-!   real(kind=8)                             :: Rtik,Rnik
-!   real(kind=8)                             :: S1,S2, ang_c
-!   real(kind=8),dimension(2)                :: nik,tik,Lik,Fik
-!   real(kind=8),dimension(2)                :: wr,wi
-!   real(kind=8),dimension(2,2)              :: Moment
-!   real(kind=8),dimension(2,2)              :: localframe
-  
-!   Moment(:,:) = 0.0
-  
-!   do i=1,nb_ligneCONTACT_POLYG
-!     if  (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     cd      = TAB_CONTACT_POLYG(i)%icdent
-!     an      = TAB_CONTACT_POLYG(i)%ianent
-!     nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
-!     nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
-!     tik(1)  = TAB_CONTACT_POLYG(i)%t(1)
-!     tik(2)  = TAB_CONTACT_POLYG(i)%t(2)
-!     Rtik    = TAB_CONTACT_POLYG(i)%rt
-!     Rnik    = TAB_CONTACT_POLYG(i)%rn
-    
-!     ! Only active contacts
-!     if (abs(Rnik) .le. 1.D-9 .and. abs(Rnik) .le. 1.D-9) cycle
-    
-!     Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
-!     Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
-!     Fik(1) = (Rnik*nik(1)+Rtik*tik(1))
-!     Fik(2) = (Rnik*nik(2)+Rtik*tik(2))
-    
-!     Moment(1,1:2) = Fik(1)*Lik(1:2) + Moment(1,1:2)
-!     Moment(2,1:2) = Fik(2)*Lik(1:2) + Moment(2,1:2)
-!   end do
-  
-!   Moment = Moment / (height*width)
-  
-!   if (first_over_all) then
-!     write(103,*) '#   time     ', '     s11     ', '     s12     ', '     s22     ', &
-!                                   '      S1     ', '      S2     ', '(S1-S2)/(S1+S2)', '  theta_s  '
-!   endif
+  implicit none
 
-!   write(103,'(4(1X,E12.5))', advance='no') time, Moment(1,1), Moment(1,2), Moment(2,2)
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i, cd, an
+  integer                                  :: ierror, matz, lda
+  real(kind=8)                             :: Rtik, Rnik
+  real(kind=8)                             :: S1, S2, theta_s
+  real(kind=8),dimension(2)                :: nik, tik, Lik, Fik
+  real(kind=8),dimension(2)                :: wr, wi
+  real(kind=8),dimension(2,2)              :: Moment
+  real(kind=8),dimension(2,2)              :: localframe
+  
+  ! Inializing variables
+  Moment(:,:) = 0.0
 
-!   lda  = 2
-!   matz = 1
-  
-!   ! Finding the eigenvalues of the global stress tensor
-!   call rg(lda, 2, Moment, wr, wi, matz, localframe, ierror)
-!   S1 = max( wr(1),wr(2) )
-!   S2 = min( wr(1),wr(2) )
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=104,file='./POSTPRO/QOVERP.DAT',status='replace')
+    write(104,*) '#   time     ', '     s11     ', '     s12     ', '     s22     ', &
+                                  '      S1     ', '      S2     ', '     Q/P     ', &
+                                  '   Theta_S   '
+  end if
 
-!   ! Computing the orientation of the stress tensor 
-!   ang_c = abs(0.5*atan2(-2*Moment(1,2),(Moment(1,1)-Moment(2,2))))
+  ! Building the moment tensor from the contacts
+  do i=1, n_contacts
+    ! Skipping contacts with the walls
+    if  (TAB_CONTACTS(i)%nature == 'PLJCx') cycle 
+    if  (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'PTPT2') cycle
+    cd      = TAB_CONTACTS(i)%cd
+    an      = TAB_CONTACTS(i)%an
+    nik     = TAB_CONTACTS(i)%n_frame
+    tik     = TAB_CONTACTS(i)%t_frame
+    Rnik    = TAB_CONTACTS(i)%rn
+    Rtik    = TAB_CONTACTS(i)%rt
+    
+    ! Only active contacts
+    if (abs(Rnik) .le. 1.D-8) cycle
+    
+    ! Building the branch vector 
+    Lik = TAB_BODIES(cd)%center-TAB_BODIES(an)%center
 
-!   ang_c = ang_c*180/pi
+    if (flag_periodic==1) then
+      ! Correcting the branch orientation and length if necessary
+      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+        ! This is a peridic case
+        if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+          Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
+        end if
+        ! Y component
+        !if (Lik(2) .gt. (max_d_vert_an + max_d_vert_cd)) then
+        !Lik(2) = Lik(2) - y_period*(Lik(2)/abs(Lik(2)))
+      end if
+    end if 
 
-!   write(103,'(4(1X,E12.5))') S1,S2,(S1-S2)/(S1+S2), ang_c
+    ! Building the force vector
+    Fik = Rnik*nik+Rtik*tik
+    
+    ! The tensor
+    Moment(1,1:2) = Moment(1,1:2) + Fik(1)*Lik(1:2)
+    Moment(2,1:2) = Moment(2,1:2) + Fik(2)*Lik(1:2)
+  end do
   
-!   print*, 'Write QoverP                    ---> Ok!'
+  ! Changing to stresses
+  Moment = Moment / (box_height*box_width)
+
+  ! Writing the stress tensor
+  write(104,'(4(1X,E12.5))', advance='no') time, Moment(1,1), Moment(1,2), Moment(2,2)
+
+  ! Computing the eigenvalues and eigenvectors of the tensor
+  ! This uses a general subroutine that calls for variables:
+  lda  = 2
+  matz = 1
   
-! end subroutine qoverp
+  ! The subroutine
+  call rg(lda, 2, Moment, wr, wi, matz, localframe, ierror)
+  S1 = max(wr(1),wr(2))
+  S2 = min(wr(1),wr(2))
+
+  ! Computing the orientation of the stress tensor 
+  theta_s = abs(0.5*atan2(-2*Moment(1,2),(Moment(1,1)-Moment(2,2))))
+
+  theta_s = theta_s*180/pi
+
+  ! Writing
+  write(104,'(4(1X,E12.5))') S1,S2,(S1-S2)/(S1+S2), theta_s
+  
+  if (i_ == last_) then
+    close(104)
+  end if
+
+  ! General info
+  print*, 'Write QoverP                  ---> Ok!'
+  
+end subroutine qoverp
+
+!==============================================================================
+! Coordination number
+!==============================================================================
+subroutine coordination(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i
+  real(kind=8)                             :: z, zc, np
+  
+  ! Initializing variables
+  z =0.
+  zc=0.
+  np=0.
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=105,file='./POSTPRO/COORDINATION.DAT',status='replace')
+    write(105,*) '#   time     ','      Z      '
+  end if
+  
+  ! Computing the number of particles in the box other than rattlers
+  np = 0
+  do i=1, n_bodies
+    if (TAB_BODIES(i)%shape == 'wallx' .or. TAB_BODIES(i)%shape == 'pt2dx') cycle
+    if (TAB_BODIES(i)%n_ctc .lt. 2) cycle
+    np = np + 1
+  end do
+  
+  ! Computing the effectif number of contacts
+  do i=1, n_contacts
+    ! Only between particles
+    if (TAB_CONTACTS(i)%nature == 'PLJCx') cycle 
+    if (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    ! Computing the number of contacts if they are active
+    if (abs(TAB_CONTACTS(i)%rn) .lt. 1e-8 .and. abs(TAB_CONTACTS(i)%rt) .lt. 1e-8) cycle 
+
+    zc = zc + 1
+
+  end do
+  
+  ! The coordination number
+  z = 2 * zc / np
+
+  ! Writing
+  write(105,'(2(1X,E12.5))') time, z
+
+  if (i_ == last_) then
+    close(105)
+  end if
+  
+  ! General info
+  print*, 'Write Coordination              ---> Ok!'
+  
+end subroutine coordination
+
+!==============================================================================
+! Computing the fabric anisotropy
+!==============================================================================
+subroutine ctc_anisotropy(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i, cd, an
+  integer                                  :: ierror, matz, lda
+  real(kind=8),dimension(2)                :: nik, Lik
+  real(kind=8),dimension(2,2)              :: Fabric
+  real(kind=8),dimension(2)                :: wr,wi
+  real(kind=8)                             :: S1, S2, cpt, Rnik
+  real(kind=8),dimension(2,2)              :: localframe
+  
+  ! Initializing 
+  cpt = 0
+  Fabric(:,:) = 0.
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=106,file='./POSTPRO/CTC_ANISOTROPY.DAT',status='replace')
+    write(106,*) '#   time     ','      ac      '
+  end if
+  
+  ! Building the fabric tensor
+  do i=1, n_contacts
+    ! Checking it is a contact between two bodies
+    if(TAB_CONTACTS(i)%nature == 'PLJCx') cycle
+    if(TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if(TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    cd      = TAB_CONTACTS(i)%cd
+    an      = TAB_CONTACTS(i)%an
+    nik     = TAB_CONTACTS(i)%n_frame
+
+    Rnik    = TAB_CONTACTS(i)%rn
+    
+    ! Checking the normal force is not zero
+    if (abs(Rnik) .le. 1.D-9) cycle
+   
+    Fabric(1,1:2) = nik(1)*nik(1:2) + Fabric(1,1:2)
+    Fabric(2,1:2) = nik(2)*nik(1:2) + Fabric(2,1:2)
+    cpt = cpt + 1
+  end do
+  
+  ! Normalizing by the number of contacts
+  Fabric = Fabric / cpt
+  
+  ! Finding the eigen values
+  lda  = 2
+  matz = 1
+  
+  call rg ( lda, 2, Fabric, wr, wi, matz, localframe, ierror )
+  S1 = max( wr(1),wr(2) )
+  S2 = min( wr(1),wr(2) )
+  
+  write(106,'(2(1X,E12.5))') time, 2*(S1-S2)
+  
+  if (i_ == last_) then
+    close(106)
+  end if
+  
+  ! General info
+  print*, 'Write Anisotropy Conctacts      ---> Ok!'
+end subroutine ctc_anisotropy
+
+!==============================================================================
+! Computing the branch anisotropy
+!==============================================================================
+subroutine brc_anisotropy(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i,cd,an
+  integer                                  :: ierror,matz,lda
+  real(kind=8)                             :: X1n,X2n, X1f,X2f,cpt,av_length, Lnik, Ltik, Rnik
+  real(kind=8), dimension(2)               :: nik,tik, Lik
+  real(kind=8), dimension(2)               :: wrn, win, wrf, wif
+  real(kind=8), dimension(2,2)             :: Fabric_N,Fabric_T, Fabric_F
+  real(kind=8), dimension(2,2)             :: localframeN, localframeF
+  
+  ! Initializing variables
+  Fabric_N(:,:) = 0.
+  Fabric_T(:,:) = 0.
+  Fabric_F(:,:) = 0.
+  cpt = 0.
+  av_length = 0.
+  Lik(:) = 0.
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=107,file='./POSTPRO/BRC_ANISOTROPY.DAT',status='replace')
+    write(107,*) '#   time     ','    a_ln+ac    ','  a_lt+a_ln-2ac    '
+  end if
+  
+  ! Building the chi tensor with the length of branches 
+  do i=1,n_contacts
+    if  (TAB_CONTACTS(i)%nature == 'PLJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    cd      = TAB_CONTACTS(i)%cd
+    an      = TAB_CONTACTS(i)%an
+    nik     = TAB_CONTACTS(i)%n_frame
+    tik     = TAB_CONTACTS(i)%t_frame
+    Rnik    = TAB_CONTACTS(i)%rn
+    
+    ! Only active contacts
+    if (abs(Rnik) .le. 1.D-9) cycle
+    
+    ! Active contacts
+    cpt = cpt + 1
+    
+    ! The branch vector
+    Lik = TAB_BODIES(cd)%center - TAB_BODIES(an)%center
+
+    if (flag_periodic==1) then
+      ! Correcting the branch orientation and length if necessary
+      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+        ! This is a peridic case
+        if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+          Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
+        end if
+        ! Y component
+        !if (Lik(2) .gt. (max_d_vert_an + max_d_vert_cd)) then
+        !Lik(2) = Lik(2) - y_period*(Lik(2)/abs(Lik(2)))
+      end if
+    end if 
+    
+    ! Average branch length
+    av_length = av_length + (Lik(1)**2 + Lik(2)**2)**0.5
+    
+    Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
+    Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
+    
+    ! Building the chi_n
+    Fabric_N(1,1:2) = Lnik*nik(1)*nik(1:2) + Fabric_N(1,1:2)
+    Fabric_N(2,1:2) = Lnik*nik(2)*nik(1:2) + Fabric_N(2,1:2)
+    
+    ! Building the chi_t
+    Fabric_T(1,1:2) = Ltik*nik(1)*tik(1:2) + Fabric_T(1,1:2)
+    Fabric_T(2,1:2) = Ltik*nik(2)*tik(1:2) + Fabric_T(2,1:2)
+  end do
+  
+  ! Computing the average branch length
+  av_length = av_length / cpt
+  
+  ! Computing the fabric forces tensors
+  Fabric_N = Fabric_N / (cpt*av_length)
+  Fabric_T = Fabric_T / (cpt*av_length)
+  
+  ! Building the full fabric forces tensor (Build this always before using rg!!!)
+  Fabric_F = Fabric_N + Fabric_T
+  
+  ! Finding the eigen values of the fabric normal forces tensor
+  lda = 2
+  matz = 1
+  
+  call rg(lda, 2, Fabric_N, wrn, win, matz, localframeN, ierror)
+  
+  X1n = max(wrn(1),wrn(2))
+  X2n = min(wrn(1),wrn(2))
+  
+  ! Finding the eigen values of the full fabric forces tensor
+  call rg(lda, 2, Fabric_F, wrf, wif, matz, localframeF, ierror)
+  X1f = max(wrf(1),wrf(2))
+  X2f = min(wrf(1),wrf(2))
+  
+  write(107,'(3(1X,E12.5))') time, 2*(X1n-X2n)/(X1n+X2n),2*(X1f-X2f)/(X1f+X2f)
+  
+  if (i_ == last_) then
+    close(107)
+  end if
+  
+  ! General info
+  print*, 'Write Anisotropy Branch          ---> Ok!'
+
+end subroutine brc_anisotropy
+
+!==============================================================================
+! Computing the force anisotropy
+!==============================================================================
+subroutine frc_anisotropy(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i,cd,an
+  integer                                  :: ierror,matz,lda
+  real(kind=8)                             :: X1n,X2n, X1f,X2f,cpt,Rtik,Rnik,av_force
+  real(kind=8), dimension(2)               :: nik,tik, Fik
+  real(kind=8), dimension(2)               :: wrn, win, wrf, wif
+  real(kind=8), dimension(2,2)             :: Fabric_N,Fabric_T, Fabric_F
+  real(kind=8), dimension(2,2)             :: localframeN, localframeF
+  
+  ! Initializing variables
+  Fabric_N(:,:) = 0.
+  Fabric_T(:,:) = 0.
+  Fabric_F(:,:) = 0.
+  cpt = 0.
+  av_force = 0.
+  Fik(:) = 0.
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=108,file='./POSTPRO/BRC_ANISOTROPY.DAT',status='replace')
+    write(108,*) '#   time     ','    a_fn+ac    ','  a_ft+a_fn-2ac    '
+  end if
+  
+  ! Building the fabric forces tensor
+  do i=1,n_contacts
+    if  (TAB_CONTACTS(i)%nature == 'PLJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    cd      = TAB_CONTACTS(i)%cd
+    an      = TAB_CONTACTS(i)%an
+    nik     = TAB_CONTACTS(i)%n_frame
+    tik     = TAB_CONTACTS(i)%t_frame
+    Rnik    = TAB_CONTACTS(i)%rn
+    Rtik    = TAB_CONTACTS(i)%rt
+    
+    ! Only active contacts
+    if (abs(Rnik) .le. 1.D-9) cycle
+    
+    ! Active contacts
+    cpt     = cpt + 1
+    
+    ! The force vector
+    Fik(:) = Rnik*nik(:) + Rtik*tik(:)
+    
+    ! Average normal force
+    av_force = av_force + Fik(1)*nik(1) + Fik(2)*nik(2)
+    
+    ! Building the tensor of normal forces
+    Fabric_N(1,1:2) = Rnik*nik(1)*nik(1:2) + Fabric_N(1,1:2)
+    Fabric_N(2,1:2) = Rnik*nik(2)*nik(1:2) + Fabric_N(2,1:2)
+    
+    ! Building the tensor of tangential forces
+    Fabric_T(1,1:2) = Rtik*nik(1)*tik(1:2) + Fabric_T(1,1:2)
+    Fabric_T(2,1:2) = Rtik*nik(2)*tik(1:2) + Fabric_T(2,1:2)
+  end do
+  
+  ! Computing the average normal force
+  av_force = av_force / cpt
+  
+  ! Computing the fabric forces tensors
+  Fabric_N = Fabric_N / (cpt*av_force)
+  Fabric_T = Fabric_T / (cpt*av_force)
+  
+  ! Building the full fabric forces tensor (Build this always before using rg!!!)
+  Fabric_F = Fabric_N + Fabric_T
+  
+  ! Finding the eigen values of the fabric normal forces tensor
+  lda = 2
+  matz = 1
+  
+  call rg(lda, 2, Fabric_N, wrn, win, matz, localframeN, ierror)
+  
+  X1n = max(wrn(1),wrn(2))
+  X2n = min(wrn(1),wrn(2))
+  
+  ! Finding the eigen values of the full fabric forces tensor
+  call rg(lda, 2, Fabric_F, wrf, wif, matz, localframeF, ierror)
+  X1f = max(wrf(1),wrf(2))
+  X2f = min(wrf(1),wrf(2))
+
+  write(108,'(3(1X,E12.5))') time, 2*(X1n-X2n)/(X1n+X2n),2*(X1f-X2f)/(X1f+X2f)
+
+  if (i_ == last_) then
+    close(108)
+  end if
+  
+  ! General info
+  print*, 'Write Anisotropy Force          ---> Ok!'
+
+end subroutine frc_anisotropy
 
 
-! !==============================================================================
-! ! Coordination number
-! !==============================================================================
-! subroutine nb_coordination
-  
-!   implicit none
-  
-!   real(kind=8)                             :: z,zc,zp
-!   integer                                  :: i
-  
-!   ! Initializing variables
-!   z =0.
-!   zc=0.
-!   zp=0.
-  
-!   ! Computing the number of particles in the box
-!   zp = n_particles
-  
-!   ! Computing the number of contacts
-!   do i=1, nb_ligneCONTACT_POLYG
-!     ! Only between particles
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
-!     ! Contacts in the box
-!     ! Computing the number of contacts if they are active
-!     if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1e-9 .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1e-9) then
-!       cycle 
-!     else 
-!       zc=zc+1
-!     end if
-!   end do
-  
-!   z = 2 * zc / zp
-  
-!   if (first_over_all) then
-!     write(100,*) '#   time     ','      z      '
-!   endif
-  
-!   write(100,'(2(1X,E12.5))') time, z
-  
-!   print*, 'Write Coordination              ---> Ok!'
-  
-! end subroutine nb_coordination
+!==============================================================================
+! Grain size distribution
+!==============================================================================
+  subroutine granulo
+    
+    implicit none
+    
+    integer                                  :: i, j, bins, sumaInt, c_bin
+    real(kind=8)                             :: rmin, rmax, interval, porcentNum
+    real(kind=8)                             :: areaTotal, porcentArea, area
+    integer, allocatable, dimension(:)       :: freq_tab
+    real(kind=8), dimension(20000)           :: tams
+    
+    ! Opening file
+    open(unit=109,file='./POSTPRO/GRANULO',status='replace')
+    
+    rmin =  9999.
+    rmax = -9999.
+    
+    ! Finding the maximun and minimun radius
+    do i=1, n_bodies
+      ! Only particles
+      if(TAB_BODIES(i)%shape == 'wallx') cycle
+      if(TAB_BODIES(i)%shape == 'pt2dx') cycle
 
+      if (TAB_BODIES(i)%radius<rmin) then
+        rmin = TAB_BODIES(i)%radius
+      end if 
+      if (TAB_BODIES(i)%radius>rmax) then
+        rmax = TAB_BODIES(i)%radius
+      end if
+    end do
+    
+    bins = 32  !here is specified the number of intervals for the distribution
 
-! !==============================================================================
-! ! Grain size distribution
-! !==============================================================================
-!   subroutine granulometry
+    ! Allocating frequencies table
+    if (allocated(freq_tab)) deallocate(freq_tab)
+    allocate(freq_tab(bins))
     
-!     implicit none
+    interval = (rmax - rmin)/bins
     
-!     real(kind=8)                             :: rmin, rmax, interval, porcentNum
-!     real(kind=8)                             :: areaTotal, porcentArea, area
-!     integer                                  :: i, j, until, sumaInt, vipar
-!     integer, dimension(20000)                :: cant
-!     real(kind=8), dimension(20000)           :: tams
-!     character(len=23)                        :: nom
+    do i=1, n_bodies
+      !c_bin = XXXX (TAB_BODIES(i)%radius - rmin)/interval XXXXXXX
+      freq_tab(c_bin) = freq_tab(c_bin) + 1
+    end do    
     
-!     nom       =  './POSTPRO/GDISTRIB.0000'
+    sumaInt = 0
+    porcentNum = 0
+    porcentArea = 0
+    area = 0
+    areaTotal = 0 
     
-!     if (compteur_clout<10) then
-!       WRITE(nom(22:23),'(I1)')   compteur_clout
-!     else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
-!       WRITE(nom(21:23),'(I2)')   compteur_clout
-!     else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
-!       WRITE(nom(20:23),'(I3)')   compteur_clout
-!     end if
+    do i=1, n_bodies
+      areaTotal = areaTotal + TAB_BODIES(i)%area
+    enddo
     
-!     open(unit=107,file=nom,status='replace')
+    !do j = 1, until  
+    !  area = area + (tams(j)**2)*pi*cant(j)
+    !  porcentArea = (area/areaTotal)*100
+    !  
+    !  write(109,'(4(1X,E12.5))') tams(j), porcentArea
+    !enddo
     
-!     rmin = 9999.
-!     rmax = -1.
-!     vipar = 0
+    close(109)
     
-!     ! Finding the maximun and minimun radius
-!     do i=1, n_particles
-!       vipar = vipar + 1
-!       if (TAB_POLYG(i)%radius<rmin) then
-!         rmin = TAB_POLYG(i)%radius
-!       end if 
-!       if (TAB_POLYG(i)%radius>rmax) then
-!         rmax = TAB_POLYG(i)%radius
-!       end if
-!     end do
+    ! General info
+    print*, 'Write Grain size dist     ---> Ok!'
     
-!     until = 500  !here is specified the number of intervals for the constrution of the distribution
-    
-!     interval = (rmax - rmin)/until            !size ranges
-    
-!     do j=1, until
-!       do i=1, n_particles
-!         if(TAB_POLYG(i)%radius .ge. (rmin + (j-1)*interval) .and. TAB_POLYG(i)%radius .lt. (interval*j + rmin)) then
-!           cant(j) = cant(j) + 1
-!         end if
-!       end do
-!     end do
-    
-!     do i=1, until
-!       tams(i) = rmin + interval*i - (interval/2)
-!     end do
-    
-    
-!     sumaInt = 0
-!     porcentNum = 0
-!     porcentArea = 0
-!     area = 0
-!     areaTotal = 0 
-    
-!     do i=1, until
-!       areaTotal = areaTotal + (tams(i)**2)*pi*cant(i)
-!     enddo
-    
-!     do j = 1, until  
-!       area = area + (tams(j)**2)*pi*cant(j)
-!       porcentArea = (area/areaTotal)*100
-      
-!       write(107,'(4(1X,E12.5))') tams(j), porcentArea
-!     enddo
-    
-!     close(107)
-    
-!     print*, 'Write GDI                       ---> Ok!'
-    
-!   end subroutine granulometry
+  end subroutine granulo
 
 
 ! !================================================
@@ -1928,8 +2313,8 @@ end subroutine compacity
 !     if (i .le. n_particles) then
 !       ! Counting the number of contacts
 !       do j=1, nb_ligneCONTACT_POLYG
-!         l_cdt = TAB_CONTACT_POLYG(j)%icdent
-!         l_ant = TAB_CONTACT_POLYG(j)%ianent
+!         l_cdt = TAB_CONTACTS_POLYG(j)%icdent
+!         l_ant = TAB_CONTACTS_POLYG(j)%ianent
         
 !         if(TAB_POLYG(l_cdt)%behav /= 'PLEXx' .or. TAB_POLYG(l_ant)%behav /= 'PLEXx') cycle
 !         if(l_cdt == i .or. l_ant == i) then
@@ -1957,15 +2342,15 @@ end subroutine compacity
 !       ! Counting the number of contacts
 !       do j=1, nb_ligneCONTACT_POLYG
         
-!         if(TAB_CONTACT_POLYG(j)%nature /= 'PLPLx') cycle
+!         if(TAB_CONTACTS_POLYG(j)%nature /= 'PLPLx') cycle
         
-!         l_cdt = TAB_CONTACT_POLYG(j)%icdent
-!         l_ant = TAB_CONTACT_POLYG(j)%ianent
+!         l_cdt = TAB_CONTACTS_POLYG(j)%icdent
+!         l_ant = TAB_CONTACTS_POLYG(j)%ianent
         
 !         if(TAB_POLYG(l_cdt)%behav /= 'PLEXx' .or. TAB_POLYG(l_ant)%behav /= 'PLEXx') cycle
 !         if(l_cdt == i .or. l_ant == i) then
 !           ! Only active contacts
-!           if (abs(TAB_CONTACT_POLYG(j)%rn) .gt. 0.0) then
+!           if (abs(TAB_CONTACTS_POLYG(j)%rn) .gt. 0.0) then
 !             l_counter = l_counter + 1
 !           end if
 !         end if
@@ -2025,7 +2410,7 @@ end subroutine compacity
 !   ! Four vertices for each parallelepiped
 !   f_counter = 0
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if(TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
+!     if(TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
 !     f_counter = f_counter + 1
 !   end do
   
@@ -2038,8 +2423,8 @@ end subroutine compacity
 !   vtk_ave_force = 0.D0
   
 !   do i = 1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
-!     vtk_ave_force = vtk_ave_force + abs(TAB_CONTACT_POLYG(i)%rn)
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
+!     vtk_ave_force = vtk_ave_force + abs(TAB_CONTACTS_POLYG(i)%rn)
 !   end do
   
 !   vtk_ave_force = vtk_ave_force/nb_ligneCONTACT_POLYG
@@ -2057,20 +2442,20 @@ end subroutine compacity
 !   k=0
 !   do i=1, nb_ligneCONTACT_POLYG
     
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
 !     ! The particles ids
-!     l_cdt = TAB_CONTACT_POLYG(i)%icdent
-!     l_ant = TAB_CONTACT_POLYG(i)%ianent
+!     l_cdt = TAB_CONTACTS_POLYG(i)%icdent
+!     l_ant = TAB_CONTACTS_POLYG(i)%ianent
 !     ! The center of each particle
 !     vtk_cd_center(:) = TAB_POLYG(l_cdt)%center(:)
 !     vtk_an_center(:) = TAB_POLYG(l_ant)%center(:)
 !     ! The normal and tangential vectors
-!     v_l_normal(:) = TAB_CONTACT_POLYG(i)%n(:)
-!     v_l_t(:) = TAB_CONTACT_POLYG(i)%t(:)
+!     v_l_normal(:) = TAB_CONTACTS_POLYG(i)%n(:)
+!     v_l_t(:) = TAB_CONTACTS_POLYG(i)%t(:)
     
 !     ! The forces
-!     l_rn = TAB_CONTACT_POLYG(i)%rn
-!     l_rt = TAB_CONTACT_POLYG(i)%rt
+!     l_rn = TAB_CONTACTS_POLYG(i)%rn
+!     l_rt = TAB_CONTACTS_POLYG(i)%rt
     
 !     l_force = (l_rn/vtk_ave_force)*l_force_scale
     
@@ -2103,7 +2488,7 @@ end subroutine compacity
   
 !   do i=1, nb_ligneCONTACT_POLYG
 !     ! Conecting the 4 vertices for each rectangle
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
     
 !     !!!!! 1st (1-2-3-4)
 !     write(121, '(I1,A)', advance= 'no') 4, ' '
@@ -2193,9 +2578,9 @@ end subroutine compacity
 !   write(121,'(A,I1,I6,A)') 'Type ', 1, f_counter, ' float'
   
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
     
-!     if (TAB_CONTACT_POLYG(i)%rn .lt. 0) then
+!     if (TAB_CONTACTS_POLYG(i)%rn .lt. 0) then
 !       write(121, '(I3)') -1
 !     else
 !       write(121, '(I3)') 1
@@ -2212,8 +2597,8 @@ end subroutine compacity
 !   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
 !   write(121,'(A,I1,I6,A)') 'RN ', 1, f_counter, ' float'
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
-!     write(121, '(F15.7)') TAB_CONTACT_POLYG(i)%rn
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
+!     write(121, '(F15.7)') TAB_CONTACTS_POLYG(i)%rn
 !   end do
   
 !   ! And jump
@@ -2226,8 +2611,8 @@ end subroutine compacity
 !   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
 !   write(121,'(A,I1,I6,A)') 'RT ', 1, f_counter, ' float'
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
-!     write(121, '(F15.7)') abs(TAB_CONTACT_POLYG(i)%rt)
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
+!     write(121, '(F15.7)') abs(TAB_CONTACTS_POLYG(i)%rt)
 !   end do
   
 !   ! And jump
@@ -2240,8 +2625,8 @@ end subroutine compacity
 !   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
 !   write(121,'(A,I1,I6,A)') 'Status ', 1, f_counter, ' float'
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx') cycle
-!     write(121, '(I2)') TAB_CONTACT_POLYG(i)%status_points
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
+!     write(121, '(I2)') TAB_CONTACTS_POLYG(i)%status_points
 !   end do
   
 !   ! And jump
@@ -2268,8 +2653,8 @@ end subroutine compacity
 !   ! Four vertices for each parallelepiped
 !   ctc_counter = 0
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if(TAB_CONTACT_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACT_POLYG(i)%gap > 0.1E-2) cycle
-!     if (TAB_CONTACT_POLYG(i)%type == 1) cycle
+!     if(TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACTS_POLYG(i)%gap > 0.1E-2) cycle
+!     if (TAB_CONTACTS_POLYG(i)%type == 1) cycle
 !     ctc_counter = ctc_counter + 1
 !   end do
   
@@ -2294,18 +2679,18 @@ end subroutine compacity
 !   k=0
 !   do i=1, nb_ligneCONTACT_POLYG
   
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACT_POLYG(i)%gap > 0.1E-2) cycle
-!     if (TAB_CONTACT_POLYG(i)%type == 1) cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACTS_POLYG(i)%gap > 0.1E-2) cycle
+!     if (TAB_CONTACTS_POLYG(i)%type == 1) cycle
     
 !     ! The particles ids
-!     l_cdt = TAB_CONTACT_POLYG(i)%icdent
-!     l_ant = TAB_CONTACT_POLYG(i)%ianent
+!     l_cdt = TAB_CONTACTS_POLYG(i)%icdent
+!     l_ant = TAB_CONTACTS_POLYG(i)%ianent
 !     ! The center of each particle
 !     vtk_cd_center(:) = TAB_POLYG(l_cdt)%center(:)
 !     vtk_an_center(:) = TAB_POLYG(l_ant)%center(:)
 !     ! The normal and tangential vectors
-!     v_l_normal(:) = TAB_CONTACT_POLYG(i)%n(:)
-!     v_l_t(:) = TAB_CONTACT_POLYG(i)%t(:)
+!     v_l_normal(:) = TAB_CONTACTS_POLYG(i)%n(:)
+!     v_l_t(:) = TAB_CONTACTS_POLYG(i)%t(:)
     
 !     ! Write! ... 4 vertices for each line
     
@@ -2336,8 +2721,8 @@ end subroutine compacity
   
 !   do i=1, nb_ligneCONTACT_POLYG
 !     ! Conecting the 4 vertices for each rectangle
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACT_POLYG(i)%gap > 0.1E-2) cycle
-!     if (TAB_CONTACT_POLYG(i)%type == 1) cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACTS_POLYG(i)%gap > 0.1E-2) cycle
+!     if (TAB_CONTACTS_POLYG(i)%type == 1) cycle
     
 !     !!!!! 1st (1-2-3-4)
 !     write(121, '(I1,A)', advance= 'no') 4, ' '
@@ -2426,9 +2811,9 @@ end subroutine compacity
 !   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
 !   write(121,'(A,I1,I6,A)') 'Status ', 1, ctc_counter, ' float'
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACT_POLYG(i)%gap > 0.1E-2) cycle
-!     if (TAB_CONTACT_POLYG(i)%type == 1) cycle
-!     write(121, '(I2)') TAB_CONTACT_POLYG(i)%status_points
+!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACTS_POLYG(i)%gap > 0.1E-2) cycle
+!     if (TAB_CONTACTS_POLYG(i)%type == 1) cycle
+!     write(121, '(I2)') TAB_CONTACTS_POLYG(i)%status_points
 !   end do
   
 !   ! And jump
@@ -2510,12 +2895,12 @@ end subroutine compacity
 !     maxint = interval*i
 !     do j=1,nb_ligneCONTACT_POLYG
 !       ! Only between discs
-!       if(TAB_CONTACT_POLYG(j)%nature /='PLPLx') cycle
+!       if(TAB_CONTACTS_POLYG(j)%nature /='PLPLx') cycle
 !       ! Only active contacts
-!       if(abs(TAB_CONTACT_POLYG(j)%rn) .le. 1.D-8) cycle
+!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .le. 1.D-8) cycle
 !       ! The normal vector
-!       nik(1)  = TAB_CONTACT_POLYG(j)%n(1)
-!       nik(2)  = TAB_CONTACT_POLYG(j)%n(2)
+!       nik(1)  = TAB_CONTACTS_POLYG(j)%n(1)
+!       nik(2)  = TAB_CONTACTS_POLYG(j)%n(2)
       
 !       ! The 1 and 2 quadrants only
 !       ! Changing the normal vector direction if necessary
@@ -2638,13 +3023,13 @@ end subroutine compacity
 
 !     do j=1,nb_ligneCONTACT_POLYG
 
-!       cd = TAB_CONTACT_POLYG(j)%icdent
-!       an = TAB_CONTACT_POLYG(j)%ianent
+!       cd = TAB_CONTACTS_POLYG(j)%icdent
+!       an = TAB_CONTACTS_POLYG(j)%ianent
 
 !       ! Only between discs
-!       if(TAB_CONTACT_POLYG(j)%nature /='PLPLx') cycle
+!       if(TAB_CONTACTS_POLYG(j)%nature /='PLPLx') cycle
 !       ! Only active contacts
-!       if(abs(TAB_CONTACT_POLYG(j)%rn) .le. 1.D-8 .and. abs(TAB_CONTACT_POLYG(j)%rt) .le. 1.D-8) cycle
+!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .le. 1.D-8 .and. abs(TAB_CONTACTS_POLYG(j)%rt) .le. 1.D-8) cycle
       
 !       ! The branch vector
 !       Lik(1) = TAB_POLYG(cd)%center(1) - TAB_POLYG(an)%center(1)
@@ -2747,9 +3132,9 @@ end subroutine compacity
 
 !   do i=1, nb_ligneCONTACT_POLYG
 !     ! Only contacts between particles
-!     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     Rnik = TAB_CONTACT_POLYG(i)%rt
-!     Rtik = TAB_CONTACT_POLYG(i)%rn
+!     if (TAB_CONTACTS_POLYG(i)%nature == 'PLJCx') cycle
+!     Rnik = TAB_CONTACTS_POLYG(i)%rt
+!     Rtik = TAB_CONTACTS_POLYG(i)%rn
 !     ! Only forces above a given threshold
 !     if (option_cohe == 1) then
 !       if (abs(Rnik) .lt. 1e-10 .and. abs(Rtik) .lt. 1e-10) cycle
@@ -2789,7 +3174,7 @@ end subroutine compacity
 !   if (first_over_all) then
 !     n_ctc_cohe = 0
 !     do i=1, nb_ligneCONTACT
-!       if (TAB_CONTACT(i)%status(1:1) == "W") then
+!       if (TAB_CONTACTS(i)%status(1:1) == "W") then
 !         n_ctc_cohe = n_ctc_cohe + 1
 !       end if
 !     end do
@@ -2812,15 +3197,15 @@ end subroutine compacity
 
 !     j=0
 !     do i=1, nb_ligneCONTACT
-!       if (TAB_CONTACT(i)%status(1:1) == "W") then
+!       if (TAB_CONTACTS(i)%status(1:1) == "W") then
 !         j = j+1
-!         cohe_couples(j,1) = TAB_CONTACT(i)%icdent
-!         cohe_couples(j,2) = TAB_CONTACT(i)%ianent
+!         cohe_couples(j,1) = TAB_CONTACTS(i)%icdent
+!         cohe_couples(j,2) = TAB_CONTACTS(i)%ianent
 
 !         ! Status, normal and tangential forces
 !         l_forces_c(j,1) = 1.D0
-!         l_forces_c(j,2) = TAB_CONTACT(i)%rn
-!         l_forces_c(j,3) = TAB_CONTACT(i)%rt
+!         l_forces_c(j,2) = TAB_CONTACTS(i)%rn
+!         l_forces_c(j,3) = TAB_CONTACTS(i)%rt
 !       end if
 !     end do
 !   end if
@@ -2833,14 +3218,14 @@ end subroutine compacity
 !       cur_broken = .true.
 !       ! Search if the contact still exists in the list
 !       do j=1, nb_ligneCONTACT
-!         if (TAB_CONTACT(j)%icdent == cohe_couples(i,1) .and. TAB_CONTACT(j)%ianent == cohe_couples(i,2)) then
-!           if (TAB_CONTACT(j)%status(1:1) == "W") then
+!         if (TAB_CONTACTS(j)%icdent == cohe_couples(i,1) .and. TAB_CONTACTS(j)%ianent == cohe_couples(i,2)) then
+!           if (TAB_CONTACTS(j)%status(1:1) == "W") then
 !             ! The contact exists and it's Cohe
 !             cur_broken = .false.
 
 !             ! The contact remains and forces are updated
-!             l_forces_c(i,2) = TAB_CONTACT(j)%rn
-!             l_forces_c(i,3) = TAB_CONTACT(j)%rt
+!             l_forces_c(i,2) = TAB_CONTACTS(j)%rn
+!             l_forces_c(i,3) = TAB_CONTACTS(j)%rt
 !           end if
 !         end if
 !       end do
@@ -2935,15 +3320,15 @@ end subroutine compacity
 !                '      FN     ', '      FT     ', '    GAP_0    ', '     GAP     ', &
 !                '    DISP_T   ', '      LN     ', '      LT     '!, '   STATUS    '
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     cd_loc  = TAB_CONTACT_POLYG(i)%icdent
-!     an_loc  = TAB_CONTACT_POLYG(i)%ianent
-!     nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
-!     nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
-!     tik(1)  = TAB_CONTACT_POLYG(i)%t(1)
-!     tik(2)  = TAB_CONTACT_POLYG(i)%t(2)
+!     if (TAB_CONTACTS_POLYG(i)%nature == 'PLJCx') cycle
+!     cd_loc  = TAB_CONTACTS_POLYG(i)%icdent
+!     an_loc  = TAB_CONTACTS_POLYG(i)%ianent
+!     nik(1)  = TAB_CONTACTS_POLYG(i)%n(1)
+!     nik(2)  = TAB_CONTACTS_POLYG(i)%n(2)
+!     tik(1)  = TAB_CONTACTS_POLYG(i)%t(1)
+!     tik(2)  = TAB_CONTACTS_POLYG(i)%t(2)
 
-!     if (TAB_CONTACT_POLYG(i)%rn .lt. 1e-9 .and. TAB_CONTACT_POLYG(i)%rt .lt. 1e-9) cycle
+!     if (TAB_CONTACTS_POLYG(i)%rn .lt. 1e-9 .and. TAB_CONTACTS_POLYG(i)%rt .lt. 1e-9) cycle
 
 !     ! The branch vector
 !     Lik(1) = TAB_POLYG(cd_loc)%center(1) - TAB_POLYG(an_loc)%center(1)
@@ -2953,12 +3338,12 @@ end subroutine compacity
 !     Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
 !     Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
 
-!     write(114,'(2(1X,I9),8(1X,E12.5))') TAB_CONTACT_POLYG(i)%icdent, TAB_CONTACT_POLYG(i)%ianent, &
-!                                                   TAB_CONTACT_POLYG(i)%cd_len, &
-!                                                   TAB_CONTACT_POLYG(i)%rn, TAB_CONTACT_POLYG(i)%rt, &
-!                                                   TAB_CONTACT_POLYG(i)%gap0, TAB_CONTACT_POLYG(i)%gap, &
-!                                                   TAB_CONTACT_POLYG(i)%tang_disp, Lnik, Ltik!, &
-!                                                   !TAB_CONTACT_POLYG(i)%law!, TAB_CONTACT_POLYG(i)%status
+!     write(114,'(2(1X,I9),8(1X,E12.5))') TAB_CONTACTS_POLYG(i)%icdent, TAB_CONTACTS_POLYG(i)%ianent, &
+!                                                   TAB_CONTACTS_POLYG(i)%cd_len, &
+!                                                   TAB_CONTACTS_POLYG(i)%rn, TAB_CONTACTS_POLYG(i)%rt, &
+!                                                   TAB_CONTACTS_POLYG(i)%gap0, TAB_CONTACTS_POLYG(i)%gap, &
+!                                                   TAB_CONTACTS_POLYG(i)%tang_disp, Lnik, Ltik!, &
+!                                                   !TAB_CONTACTS_POLYG(i)%law!, TAB_CONTACTS_POLYG(i)%status
 !   end do
 
 !   close(114)
@@ -3023,17 +3408,17 @@ end subroutine compacity
 !                '      FN     ', '      FT     ', '    GAP_0    ', '     GAP     ', &
 !                '    DISP_T   ', '      LN     ', '      LT     '!, '   STATUS    '
 !   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     cd_loc  = TAB_CONTACT_POLYG(i)%icdent
-!     an_loc  = TAB_CONTACT_POLYG(i)%ianent
-!     nik_c(1)  = TAB_CONTACT_POLYG(i)%n(1)
-!     nik_c(2)  = TAB_CONTACT_POLYG(i)%n(2)
-!     tik_c(1)  = TAB_CONTACT_POLYG(i)%t(1)
-!     tik_c(2)  = TAB_CONTACT_POLYG(i)%t(2)
-!     Rnik  = TAB_CONTACT_POLYG(i)%rn
-!     Rtik  = TAB_CONTACT_POLYG(i)%rt
+!     if (TAB_CONTACTS_POLYG(i)%nature == 'PLJCx') cycle
+!     cd_loc  = TAB_CONTACTS_POLYG(i)%icdent
+!     an_loc  = TAB_CONTACTS_POLYG(i)%ianent
+!     nik_c(1)  = TAB_CONTACTS_POLYG(i)%n(1)
+!     nik_c(2)  = TAB_CONTACTS_POLYG(i)%n(2)
+!     tik_c(1)  = TAB_CONTACTS_POLYG(i)%t(1)
+!     tik_c(2)  = TAB_CONTACTS_POLYG(i)%t(2)
+!     Rnik  = TAB_CONTACTS_POLYG(i)%rn
+!     Rtik  = TAB_CONTACTS_POLYG(i)%rt
 
-!     if (TAB_CONTACT_POLYG(i)%rn .lt. 1e-9 .and. TAB_CONTACT_POLYG(i)%rt .lt. 1e-9) cycle
+!     if (TAB_CONTACTS_POLYG(i)%rn .lt. 1e-9 .and. TAB_CONTACTS_POLYG(i)%rt .lt. 1e-9) cycle
 
 !     ! The branch vector
 !     Lik(1) = TAB_POLYG(cd_loc)%center(1) - TAB_POLYG(an_loc)%center(1)
@@ -3060,12 +3445,12 @@ end subroutine compacity
 !     Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
 !     Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
 
-!     write(126,'(2(1X,I9),8(1X,E12.5))') TAB_CONTACT_POLYG(i)%icdent, TAB_CONTACT_POLYG(i)%ianent, &
-!                                                   TAB_CONTACT_POLYG(i)%cd_len, &
+!     write(126,'(2(1X,I9),8(1X,E12.5))') TAB_CONTACTS_POLYG(i)%icdent, TAB_CONTACTS_POLYG(i)%ianent, &
+!                                                   TAB_CONTACTS_POLYG(i)%cd_len, &
 !                                                   Force_N, Force_T, &
-!                                                   TAB_CONTACT_POLYG(i)%gap0, TAB_CONTACT_POLYG(i)%gap, &
-!                                                   TAB_CONTACT_POLYG(i)%tang_disp, Norme_LN, Norme_LT !, &
-!                                                   !TAB_CONTACT_POLYG(i)%law!, TAB_CONTACT_POLYG(i)%status
+!                                                   TAB_CONTACTS_POLYG(i)%gap0, TAB_CONTACTS_POLYG(i)%gap, &
+!                                                   TAB_CONTACTS_POLYG(i)%tang_disp, Norme_LN, Norme_LT !, &
+!                                                   !TAB_CONTACTS_POLYG(i)%law!, TAB_CONTACTS_POLYG(i)%status
 !   end do
 
 !   close(126)
@@ -3073,251 +3458,7 @@ end subroutine compacity
 !   print*, 'Write Interaction List L       ---> Ok!'
 ! end subroutine list_interact_l
 
-! !==============================================================================
-! ! Calcul de l'anisotropie des contacts
-! !==============================================================================
-! subroutine anisotropy_contact
-  
-!   implicit none
-  
-!   real(kind=8),dimension(2,2)              :: Fabric
-!   real(kind=8),dimension(2)                :: nik
-!   integer                                  :: i,cd,an
-!   integer                                  :: ierror,matz,lda
-!   real(kind=8),dimension(2)                :: wr,wi
-!   real(kind=8)                             :: S1,S2,cpt, Rnik
-!   real(kind=8),dimension(2,2)              :: localframe
-  
-!   ! Initializing the number of active contacts
-!   cpt = 0
-  
-!   ! Initializing the fabric tensor
-!   Fabric(:,:) = 0.
-  
-!   ! Building the fabric tensor
-!   do i=1,nb_ligneCONTACT
-!     ! Checking it is a contact between two bodies
-!     if(TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     cd      = TAB_CONTACT_POLYG(i)%icdent
-!     an      = TAB_CONTACT_POLYG(i)%ianent
-!     nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
-!     nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
-!     Rnik    = TAB_CONTACT_POLYG(i)%rn
-    
-!     ! Checking the normal force is not zero
-!     if (abs(Rnik) .le. 1.D-8) cycle
-    
-!     Fabric(1,1:2) = nik(1)*nik(1:2) + Fabric(1,1:2)
-!     Fabric(2,1:2) = nik(2)*nik(1:2) + Fabric(2,1:2)
-!     cpt = cpt + 1
-!   end do
-  
-!   ! Normalizing by the number of contacts
-!   Fabric = Fabric / cpt
-  
-!   ! Finding the eigen values
-!   lda  = 2
-!   matz = 1
-  
-!   call rg ( lda, 2, Fabric, wr, wi, matz, localframe, ierror )
-!   S1 = max( wr(1),wr(2) )
-!   S2 = min( wr(1),wr(2) )
-  
-!   if (first_over_all) then
-!     write(104,*) '#   time     ', '     ac      '
-!   end if
-  
-!   write(104,'(2(1X,E12.5))') time, 2*(S1-S2)
-  
-!   print*, 'Write Anisotropy Conctacts      ---> Ok!'
-  
-! end subroutine anisotropy_contact
 
-
-! !==============================================================================
-! ! Calcul de l'anisotropie des contacts
-! !==============================================================================
-! subroutine anisotropy_force
-  
-!   implicit none
-  
-!   real(kind=8), dimension(2,2)                 :: Fabric_N,Fabric_T, Fabric_F
-!   real(kind=8), dimension(2)                   :: nik,tik
-!   integer                                      :: i,cd,an,j
-!   integer                                      :: ierror,matz,lda
-!   real(kind=8), dimension(2)                   :: wrn, win, wrf, wif
-!   real(kind=8)                                 :: X1n,X2n,X1t,X2t, X1f,X2f,cpt,Rtik,Rnik,av_force
-!   real(kind=8), dimension(2,2)                 :: localframeN, localframeF
-!   real(kind=8), dimension(2)                   :: Fik
-  
-!   ! Initializing variables
-!   Fabric_N(:,:) = 0.
-!   Fabric_T(:,:) = 0.
-!   Fabric_F(:,:) = 0.
-!   cpt = 0.
-!   av_force = 0.
-!   Fik(:) = 0.
-  
-!   ! Building the fabric forces tensor
-!   do i=1,nb_ligneCONTACT_POLYG
-!     if  (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     cd      = TAB_CONTACT_POLYG(i)%icdent
-!     an      = TAB_CONTACT_POLYG(i)%ianent
-!     nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
-!     nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
-!     tik(1)  = TAB_CONTACT_POLYG(i)%t(1)
-!     tik(2)  = TAB_CONTACT_POLYG(i)%t(2)
-!     Rnik    = TAB_CONTACT_POLYG(i)%rn
-!     Rtik    = TAB_CONTACT_POLYG(i)%rt
-    
-!     ! Only active contacts
-!     if (abs(Rnik) .le. 1.D-8) cycle
-    
-!     ! Active contacts
-!     cpt     = cpt + 1
-    
-!     ! The force vector
-!     Fik(:) = Rnik*nik(:) + Rtik*tik(:)
-    
-!     ! Average normal force
-!     av_force = av_force + Fik(1)*nik(1) + Fik(2)*nik(2)
-    
-!     ! Building the tensor of normal forces
-!     Fabric_N(1,1:2) = Rnik*nik(1)*nik(1:2) + Fabric_N(1,1:2)
-!     Fabric_N(2,1:2) = Rnik*nik(2)*nik(1:2) + Fabric_N(2,1:2)
-    
-!     ! Building the tensor of tangential forces
-!     Fabric_T(1,1:2) = Rtik*nik(1)*tik(1:2) + Fabric_T(1,1:2)
-!     Fabric_T(2,1:2) = Rtik*nik(2)*tik(1:2) + Fabric_T(2,1:2)
-    
-!   end do
-  
-!   ! Computing the average normal force
-!   av_force = av_force / cpt
-  
-!   ! Computing the fabric forces tensors
-!   Fabric_N = Fabric_N / (cpt*av_force)
-!   Fabric_T = Fabric_T / (cpt*av_force)
-  
-!   ! Building the full fabric forces tensor (Built this always before using rg!!!)
-!   Fabric_F = Fabric_N + Fabric_T
-  
-!   ! Finding the eigen values of the fabric normal forces tensor
-!   lda = 2
-!   matz = 1
-  
-!   call rg(lda, 2, Fabric_N, wrn, win, matz, localframeN, ierror)
-  
-!   X1n = max(wrn(1),wrn(2))
-!   X2n = min(wrn(1),wrn(2))
-  
-!   ! Finding the eigen values of the full fabric forces tensor
-!   call rg(lda, 2, Fabric_F, wrf, wif, matz, localframeF, ierror)
-!   X1f = max(wrf(1),wrf(2))
-!   X2f = min(wrf(1),wrf(2))
-  
-!   if (first_over_all) then
-!      write(105,*) '#   time     ', '2(X1-2)/(X1+2)n', ' 2(X1-2)/(X1+2)f '
-!   end if 
-  
-!   write(105,'(3(1X,E12.5))') time, 2*(X1n-X2n)/(X1n+X2n),2*(X1f-X2f)/(X1f+X2f)
-  
-!   print*, 'Write Anisotropy Force          ---> Ok!'
-! end subroutine anisotropy_force
-
-
-! !==============================================================================
-! ! Calcul de l'anisotropie des branches
-! !==============================================================================
-! subroutine anisotropy_branch
-  
-!   implicit none
-  
-!   real(kind=8), dimension(2,2)                 :: Fabric_N,Fabric_T, Fabric_F
-!   real(kind=8), dimension(2)                   :: nik,tik
-!   integer                                      :: i,cd,an,j
-!   integer                                      :: ierror,matz,lda
-!   real(kind=8), dimension(2)                   :: wrn, win, wrf, wif
-!   real(kind=8)                                 :: X1n,X2n,X1t,X2t, X1f,X2f,cpt,av_length, Lnik, Ltik, Rnik
-!   real(kind=8), dimension(2,2)                 :: localframeN, localframeF
-!   real(kind=8), dimension(2)                   :: Lik
-  
-!   ! Initializing variables
-!   Fabric_N(:,:) = 0.
-!   Fabric_T(:,:) = 0.
-!   Fabric_F(:,:) = 0.
-!   cpt = 0.
-!   av_length = 0.
-!   Lik(:) = 0.
-  
-!   ! Building the chi tensor with the length of branches 
-!   do i=1,nb_ligneCONTACT_POLYG
-!     if  (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     cd      = TAB_CONTACT_POLYG(i)%icdent
-!     an      = TAB_CONTACT_POLYG(i)%ianent
-!     nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
-!     nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
-!     tik(1)  = TAB_CONTACT_POLYG(i)%t(1)
-!     tik(2)  = TAB_CONTACT_POLYG(i)%t(2)
-!     Rnik    = TAB_CONTACT_POLYG(i)%rn
-    
-!     ! Only active contacts
-!     if (abs(Rnik) .le. 1.D-8) cycle
-    
-!     ! Active contacts
-!     cpt     = cpt + 1
-    
-!     ! The branch vector
-!     Lik(1) = TAB_POLYG(cd)%center(1) - TAB_POLYG(an)%center(1)
-!     Lik(2) = TAB_POLYG(cd)%center(2) - TAB_POLYG(an)%center(2)
-    
-!     ! Average branch length
-!     av_length = av_length + (Lik(1)**2 + Lik(2)**2)**0.5
-    
-!     Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
-!     Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
-    
-!     ! Building the chi_n
-!     Fabric_N(1,1:2) = Lnik*nik(1)*nik(1:2) + Fabric_N(1,1:2)
-!     Fabric_N(2,1:2) = Lnik*nik(2)*nik(1:2) + Fabric_N(2,1:2)
-    
-!     ! Building the tensor of tangential forces
-!     Fabric_T(1,1:2) = Ltik*nik(1)*tik(1:2) + Fabric_T(1,1:2)
-!     Fabric_T(2,1:2) = Ltik*nik(2)*tik(1:2) + Fabric_T(2,1:2)
-!   end do
-  
-!   ! Computing the average normal force
-!   av_length = av_length / cpt
-  
-!   ! Computing the fabric forces tensors
-!   Fabric_N = Fabric_N / (cpt*av_length)
-!   Fabric_T = Fabric_T / (cpt*av_length)
-  
-!   ! Building the full fabric forces tensor (Built this always before using rg!!!)
-!   Fabric_F = Fabric_N + Fabric_T
-  
-!   ! Finding the eigen values of the fabric normal forces tensor
-!   lda = 2
-!   matz = 1
-  
-!   call rg(lda, 2, Fabric_N, wrn, win, matz, localframeN, ierror)
-  
-!   X1n = max(wrn(1),wrn(2))
-!   X2n = min(wrn(1),wrn(2))
-  
-!   ! Finding the eigen values of the full fabric forces tensor
-!   call rg(lda, 2, Fabric_F, wrf, wif, matz, localframeF, ierror)
-!   X1f = max(wrf(1),wrf(2))
-!   X2f = min(wrf(1),wrf(2))
-  
-!   if (first_over_all) then
-!      write(106,*) '#   time     ', '2(X1-2)/(X1+2)n', ' 2(X1-2)/(X1+2)f '
-!   end if 
-  
-!   write(106,'(3(1X,E12.5))') time, 2*(X1n-X2n)/(X1n+X2n),2*(X1f-X2f)/(X1f+X2f)
-  
-!   print*, 'Write Anisotropy Branch          ---> Ok!'
-! end subroutine anisotropy_branch
 
 ! !==============================================================================
 ! ! Branch orientation
@@ -3388,13 +3529,13 @@ end subroutine compacity
 !     minint = interval*(i - 1)
 !     maxint = interval*i
 !     do j=1,nb_ligneCONTACT_POLYG
-!       cd = TAB_CONTACT_POLYG(j)%icdent
-!       an = TAB_CONTACT_POLYG(j)%ianent
+!       cd = TAB_CONTACTS_POLYG(j)%icdent
+!       an = TAB_CONTACTS_POLYG(j)%ianent
 !       ! Only between discs
-!       if(TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
+!       if(TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
 
 !       ! Only active contacts
-!       if(abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-9) cycle
+!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .lt. 1.D-9) cycle
 
 !       ! The branch vector
 !       Lik(:) = TAB_POLYG(cd)%center(:)-TAB_POLYG(an)%center(:)
@@ -3403,12 +3544,12 @@ end subroutine compacity
 !       if (sqrt(Lik(1)**2 + Lik(2)**2) .gt. 3.*(TAB_POLYG(cd)%radius + TAB_POLYG(an)%radius)) cycle
 
 !       ! The normal vector
-!       nik  = TAB_CONTACT_POLYG(j)%n
+!       nik  = TAB_CONTACTS_POLYG(j)%n
 
 !       ! The tangential vector - xz plane!
-!       !tik = TAB_CONTACT(j)%t
-!       !sik = TAB_CONTACT(j)%s
-!       !tanik = sik*TAB_CONTACT(j)%rs + tik*TAB_CONTACT(j)%rt
+!       !tik = TAB_CONTACTS(j)%t
+!       !sik = TAB_CONTACTS(j)%s
+!       !tanik = sik*TAB_CONTACTS(j)%rs + tik*TAB_CONTACTS(j)%rt
 
 !       ! unitary
 !       !tanik = tanik/sqrt(tanik(1)**2 + tanik(2)**2 + tanik(3)**2)
@@ -3540,13 +3681,13 @@ end subroutine compacity
 !     minint = interval*(i - 1)
 !     maxint = interval*i
 !     do j=1,nb_ligneCONTACT_POLYG
-!       cd = TAB_CONTACT_POLYG(j)%icdent
-!       an = TAB_CONTACT_POLYG(j)%ianent
+!       cd = TAB_CONTACTS_POLYG(j)%icdent
+!       an = TAB_CONTACTS_POLYG(j)%ianent
 !       ! Only between discs
-!       if(TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
+!       if(TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
 
 !       ! Only active contacts
-!       if(abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-8 .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-8) cycle
+!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .lt. 1.D-8 .and. abs(TAB_CONTACTS_POLYG(j)%rt) .lt. 1.D-8) cycle
 
 !       ! The branch vector
 !       Lik(:) = TAB_POLYG(cd)%center(:)-TAB_POLYG(an)%center(:)
@@ -3559,9 +3700,9 @@ end subroutine compacity
 !       nik(2) = Lik(2)/(Lik(1)**2 + Lik(2)**2)**0.5
 
 !       ! The tangential vector - xz plane!
-!       !tik = TAB_CONTACT(j)%t
-!       !sik = TAB_CONTACT(j)%s
-!       !tanik = sik*TAB_CONTACT(j)%rs + tik*TAB_CONTACT(j)%rt
+!       !tik = TAB_CONTACTS(j)%t
+!       !sik = TAB_CONTACTS(j)%s
+!       !tanik = sik*TAB_CONTACTS(j)%rs + tik*TAB_CONTACTS(j)%rt
 
 !       ! unitary
 !       !tanik = tanik/sqrt(tanik(1)**2 + tanik(2)**2 + tanik(3)**2)
@@ -3694,22 +3835,22 @@ end subroutine compacity
 !     minint = interval*(i - 1)
 !     maxint = interval*i
 !     do j=1,nb_ligneCONTACT_POLYG
-!       cd = TAB_CONTACT_POLYG(j)%icdent
-!       an = TAB_CONTACT_POLYG(j)%ianent
+!       cd = TAB_CONTACTS_POLYG(j)%icdent
+!       an = TAB_CONTACTS_POLYG(j)%ianent
 !       ! Only between discs
-!       if(TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
+!       if(TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
 
 !       ! Only active contacts
-!       if(abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-9) cycle
+!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .lt. 1.D-9) cycle
 
-!       Rnik = TAB_CONTACT_POLYG(j)%rn
-!       Rtik = TAB_CONTACT_POLYG(j)%rt
+!       Rnik = TAB_CONTACTS_POLYG(j)%rn
+!       Rtik = TAB_CONTACTS_POLYG(j)%rt
 
 !       ! The normal vector
-!       nik = TAB_CONTACT_POLYG(j)%n
+!       nik = TAB_CONTACTS_POLYG(j)%n
 
 !       ! The tangential vector
-!       tik = TAB_CONTACT_POLYG(j)%t
+!       tik = TAB_CONTACTS_POLYG(j)%t
 !       ! The real tangential vector - in xz plane!
 !       !tanik(1:3) = Rsik*sik(1:3) + Rtik*tik(1:3)
 !       tanik(1) = nik(2)
@@ -3726,8 +3867,8 @@ end subroutine compacity
 
 !       !print*, 'ini'
 !       !print*, pro_n
-!       !print*, TAB_CONTACT(j)%rn
-!       !print*, TAB_CONTACT(j)%n
+!       !print*, TAB_CONTACTS(j)%rn
+!       !print*, TAB_CONTACTS(j)%n
 !       !print*, Fik
 !       !print*, 'asdasd'
 !       !tanik_plane(1) = Rsik*sik(1) + Rtik*tik(1)
@@ -3866,22 +4007,22 @@ end subroutine compacity
 !     minint = interval*(i - 1)
 !     maxint = interval*i
 !     do j=1,nb_ligneCONTACT_POLYG
-!       cd = TAB_CONTACT_POLYG(j)%icdent
-!       an = TAB_CONTACT_POLYG(j)%ianent
+!       cd = TAB_CONTACTS_POLYG(j)%icdent
+!       an = TAB_CONTACTS_POLYG(j)%ianent
 !       ! Only between discs
-!       if(TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
+!       if(TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
 
 !       ! Only active contacts
-!       if(abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-8 .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-9) cycle
+!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .lt. 1.D-8 .and. abs(TAB_CONTACTS_POLYG(j)%rt) .lt. 1.D-9) cycle
 
-!       Rnik = TAB_CONTACT_POLYG(j)%rn
-!       Rtik = TAB_CONTACT_POLYG(j)%rt
+!       Rnik = TAB_CONTACTS_POLYG(j)%rn
+!       Rtik = TAB_CONTACTS_POLYG(j)%rt
 
 !       ! The normal vector
-!       nik_c(1) = TAB_CONTACT_POLYG(j)%n(1)
-!       nik_c(2) = TAB_CONTACT_POLYG(j)%n(2)
-!       tik_c(1) = TAB_CONTACT_POLYG(j)%t(1)
-!       tik_c(2) = TAB_CONTACT_POLYG(j)%t(2)
+!       nik_c(1) = TAB_CONTACTS_POLYG(j)%n(1)
+!       nik_c(2) = TAB_CONTACTS_POLYG(j)%n(2)
+!       tik_c(1) = TAB_CONTACTS_POLYG(j)%t(1)
+!       tik_c(2) = TAB_CONTACTS_POLYG(j)%t(2)
 
 !       ! The force vector
 !       Fik(1:2) = (Rnik*nik_c(1:2)+Rtik*tik_c(1:2))
@@ -3967,11 +4108,11 @@ end subroutine compacity
 !     do j=1, nb_ligneCONTACT_POLYG
       
 !       ! For the active contacts
-!       if (TAB_CONTACT_POLYG(j)%rn .le. 0.D0) cycle
-!       if (TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
+!       if (TAB_CONTACTS_POLYG(j)%rn .le. 0.D0) cycle
+!       if (TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
       
-!       cd = TAB_CONTACT_POLYG(j)%icdent
-!       an = TAB_CONTACT_POLYG(j)%ianent
+!       cd = TAB_CONTACTS_POLYG(j)%icdent
+!       an = TAB_CONTACTS_POLYG(j)%ianent
 !       if (cd == i .or. an == i) then
 !         temp_counter = temp_counter + 1
 !       end if
@@ -4063,18 +4204,18 @@ end subroutine compacity
 !   cpt = 0
 
 !   do i=1,nb_ligneCONTACT_POLYG
-!     cd      = TAB_CONTACT_POLYG(i)%icdent
-!     an      = TAB_CONTACT_POLYG(i)%ianent
+!     cd      = TAB_CONTACTS_POLYG(i)%icdent
+!     an      = TAB_CONTACTS_POLYG(i)%ianent
 
-!     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-9) cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature == 'PLJCx') cycle
+!     if (abs(TAB_CONTACTS_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACTS_POLYG(i)%rt) .lt. 1.D-9) cycle
 
-!     nik(1) = TAB_CONTACT_POLYG(i)%n(1)
-!     nik(2) = TAB_CONTACT_POLYG(i)%n(2)
-!     tik(1) = TAB_CONTACT_POLYG(i)%t(1)
-!     tik(2) = TAB_CONTACT_POLYG(i)%t(2)
-!     Rtik   = TAB_CONTACT_POLYG(i)%rt
-!     Rnik   = TAB_CONTACT_POLYG(i)%rn
+!     nik(1) = TAB_CONTACTS_POLYG(i)%n(1)
+!     nik(2) = TAB_CONTACTS_POLYG(i)%n(2)
+!     tik(1) = TAB_CONTACTS_POLYG(i)%t(1)
+!     tik(2) = TAB_CONTACTS_POLYG(i)%t(2)
+!     Rtik   = TAB_CONTACTS_POLYG(i)%rt
+!     Rnik   = TAB_CONTACTS_POLYG(i)%rn
 
 !     Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
 !     Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
@@ -4086,8 +4227,8 @@ end subroutine compacity
 !     Moment(1,1:2) = Fik(1)*Lik(1:2) + Moment(1,1:2)
 !     Moment(2,1:2) = Fik(2)*Lik(1:2) + Moment(2,1:2)
   
-!     Force_N = TAB_CONTACT_POLYG(i)%rn !TAB_CONTACT_POLYG(i)%F(1)*nik(1) + TAB_CONTACT_POLYG(i)%F(2)*nik(2)
-!     Force_T = TAB_CONTACT_POLYG(i)%rt !TAB_CONTACT_POLYG(i)%F(1)*tik(1) + TAB_CONTACT_POLYG(i)%F(2)*tik(2)
+!     Force_N = TAB_CONTACTS_POLYG(i)%rn !TAB_CONTACTS_POLYG(i)%F(1)*nik(1) + TAB_CONTACTS_POLYG(i)%F(2)*nik(2)
+!     Force_T = TAB_CONTACTS_POLYG(i)%rt !TAB_CONTACTS_POLYG(i)%F(1)*tik(1) + TAB_CONTACTS_POLYG(i)%F(2)*tik(2)
 
 !     Norme_LN = (Lik(1)*nik(1) + Lik(2)*nik(2))
 !     Norme_LT = (Lik(1)*tik(1) + Lik(2)*tik(2))
@@ -4117,22 +4258,22 @@ end subroutine compacity
 !   Norme_LT = 0.
 
 !   do j=1,nb_ligneCONTACT_POLYG
-!     cd      = TAB_CONTACT_POLYG(j)%icdent
-!     an      = TAB_CONTACT_POLYG(j)%ianent
+!     cd      = TAB_CONTACTS_POLYG(j)%icdent
+!     an      = TAB_CONTACTS_POLYG(j)%ianent
 
-!     if (TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
-!     if (abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-9) cycle
+!     if (TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
+!     if (abs(TAB_CONTACTS_POLYG(j)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACTS_POLYG(j)%rt) .lt. 1.D-9) cycle
 
-!     nik(1) = TAB_CONTACT_POLYG(j)%n(1)
-!     nik(2) = TAB_CONTACT_POLYG(j)%n(2)
-!     tik(1) = TAB_CONTACT_POLYG(j)%t(1)
-!     tik(2) = TAB_CONTACT_POLYG(j)%t(2)
+!     nik(1) = TAB_CONTACTS_POLYG(j)%n(1)
+!     nik(2) = TAB_CONTACTS_POLYG(j)%n(2)
+!     tik(1) = TAB_CONTACTS_POLYG(j)%t(1)
+!     tik(2) = TAB_CONTACTS_POLYG(j)%t(2)
 
 !     Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
 !     Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
 
-!     Force_N  = TAB_CONTACT_POLYG(j)%rn !TAB_CONTACT_POLYG(i)%F(1)*nik(1) + TAB_CONTACT_POLYG(i)%F(2)*nik(2)
-!     Force_T  = TAB_CONTACT_POLYG(j)%rt !TAB_CONTACT_POLYG(i)%F(1)*tik(1) + TAB_CONTACT_POLYG(i)%F(2)*tik(2)
+!     Force_N  = TAB_CONTACTS_POLYG(j)%rn !TAB_CONTACTS_POLYG(i)%F(1)*nik(1) + TAB_CONTACTS_POLYG(i)%F(2)*nik(2)
+!     Force_T  = TAB_CONTACTS_POLYG(j)%rt !TAB_CONTACTS_POLYG(i)%F(1)*tik(1) + TAB_CONTACTS_POLYG(i)%F(2)*tik(2)
 !     Norme_LN = ( Lik(1)*nik(1) + Lik(2)*nik(2) )
 !     Norme_LT = ( Lik(1)*tik(1) + Lik(2)*tik(2) )
 
@@ -4222,14 +4363,14 @@ end subroutine compacity
 !   Fabric = 0.D0
 
 !   do i=1,nb_ligneCONTACT_POLYG
-!     cd = TAB_CONTACT_POLYG(i)%icdent
-!     an = TAB_CONTACT_POLYG(i)%ianent
+!     cd = TAB_CONTACTS_POLYG(i)%icdent
+!     an = TAB_CONTACTS_POLYG(i)%ianent
 
-!     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-9) cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature == 'PLJCx') cycle
+!     if (abs(TAB_CONTACTS_POLYG(i)%rn) .lt. 1.D-9  .and. abs(TAB_CONTACTS_POLYG(i)%rt) .lt. 1.D-9) cycle
 
-!     nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
-!     nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
+!     nik(1)  = TAB_CONTACTS_POLYG(i)%n(1)
+!     nik(2)  = TAB_CONTACTS_POLYG(i)%n(2)
 
 !     Fabric(1,1:2) = nik(1)*nik(1:2) + Fabric(1,1:2)
 !     Fabric(2,1:2) = nik(2)*nik(1:2) + Fabric(2,1:2)
@@ -4383,18 +4524,18 @@ end subroutine compacity
 !   cpt = 0
 
 !   do i=1,nb_ligneCONTACT_POLYG
-!     cd      = TAB_CONTACT_POLYG(i)%icdent
-!     an      = TAB_CONTACT_POLYG(i)%ianent
+!     cd      = TAB_CONTACTS_POLYG(i)%icdent
+!     an      = TAB_CONTACTS_POLYG(i)%ianent
 
-!     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-8) cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature == 'PLJCx') cycle
+!     if (abs(TAB_CONTACTS_POLYG(i)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACTS_POLYG(i)%rt) .lt. 1.D-8) cycle
 
-!     nik_c(1) = TAB_CONTACT_POLYG(i)%n(1)
-!     nik_c(2) = TAB_CONTACT_POLYG(i)%n(2)
-!     tik_c(1) = TAB_CONTACT_POLYG(i)%t(1)
-!     tik_c(2) = TAB_CONTACT_POLYG(i)%t(2)
-!     Rtik     = TAB_CONTACT_POLYG(i)%rt
-!     Rnik     = TAB_CONTACT_POLYG(i)%rn
+!     nik_c(1) = TAB_CONTACTS_POLYG(i)%n(1)
+!     nik_c(2) = TAB_CONTACTS_POLYG(i)%n(2)
+!     tik_c(1) = TAB_CONTACTS_POLYG(i)%t(1)
+!     tik_c(2) = TAB_CONTACTS_POLYG(i)%t(2)
+!     Rtik     = TAB_CONTACTS_POLYG(i)%rt
+!     Rnik     = TAB_CONTACTS_POLYG(i)%rn
 
 !     Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
 !     Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
@@ -4414,8 +4555,8 @@ end subroutine compacity
 !     Moment(1,1:2) = Fik(1)*Lik(1:2) + Moment(1,1:2)
 !     Moment(2,1:2) = Fik(2)*Lik(1:2) + Moment(2,1:2)
   
-!     !Force_N = TAB_CONTACT_POLYG(i)%rn !TAB_CONTACT_POLYG(i)%F(1)*nik(1) + TAB_CONTACT_POLYG(i)%F(2)*nik(2)
-!     !Force_T = TAB_CONTACT_POLYG(i)%rt !TAB_CONTACT_POLYG(i)%F(1)*tik(1) + TAB_CONTACT_POLYG(i)%F(2)*tik(2)
+!     !Force_N = TAB_CONTACTS_POLYG(i)%rn !TAB_CONTACTS_POLYG(i)%F(1)*nik(1) + TAB_CONTACTS_POLYG(i)%F(2)*nik(2)
+!     !Force_T = TAB_CONTACTS_POLYG(i)%rt !TAB_CONTACTS_POLYG(i)%F(1)*tik(1) + TAB_CONTACTS_POLYG(i)%F(2)*tik(2)
 
 !     ! Forces on the L frame 
 !     Force_N = Fik(1)*nik(1) + Fik(2)*nik(2)
@@ -4449,18 +4590,18 @@ end subroutine compacity
 !   Norme_LT = 0.
 
 !   do j=1,nb_ligneCONTACT_POLYG
-!     cd      = TAB_CONTACT_POLYG(j)%icdent
-!     an      = TAB_CONTACT_POLYG(j)%ianent
+!     cd      = TAB_CONTACTS_POLYG(j)%icdent
+!     an      = TAB_CONTACTS_POLYG(j)%ianent
 
-!     if (TAB_CONTACT_POLYG(j)%nature == 'PLJCx') cycle
-!     if (abs(TAB_CONTACT_POLYG(j)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACT_POLYG(j)%rt) .lt. 1.D-8) cycle
+!     if (TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
+!     if (abs(TAB_CONTACTS_POLYG(j)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACTS_POLYG(j)%rt) .lt. 1.D-8) cycle
 
-!     nik_c(1) = TAB_CONTACT_POLYG(j)%n(1)
-!     nik_c(2) = TAB_CONTACT_POLYG(j)%n(2)
-!     tik_c(1) = TAB_CONTACT_POLYG(j)%t(1)
-!     tik_c(2) = TAB_CONTACT_POLYG(j)%t(2)
-!     Rtik     = TAB_CONTACT_POLYG(j)%rt
-!     Rnik     = TAB_CONTACT_POLYG(j)%rn
+!     nik_c(1) = TAB_CONTACTS_POLYG(j)%n(1)
+!     nik_c(2) = TAB_CONTACTS_POLYG(j)%n(2)
+!     tik_c(1) = TAB_CONTACTS_POLYG(j)%t(1)
+!     tik_c(2) = TAB_CONTACTS_POLYG(j)%t(2)
+!     Rtik     = TAB_CONTACTS_POLYG(j)%rt
+!     Rnik     = TAB_CONTACTS_POLYG(j)%rn
 
 !     Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
 !     Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
@@ -4476,8 +4617,8 @@ end subroutine compacity
 !     !Fik(1) = (Rnik*nik_c(1)+Rtik*tik_c(1))
 !     !Fik(2) = (Rnik*nik_c(2)+Rtik*tik_c(2))
 
-!     !Force_N  = TAB_CONTACT_POLYG(j)%rn !TAB_CONTACT_POLYG(i)%F(1)*nik(1) + TAB_CONTACT_POLYG(i)%F(2)*nik(2)
-!     !Force_T  = TAB_CONTACT_POLYG(j)%rt !TAB_CONTACT_POLYG(i)%F(1)*tik(1) + TAB_CONTACT_POLYG(i)%F(2)*tik(2)
+!     !Force_N  = TAB_CONTACTS_POLYG(j)%rn !TAB_CONTACTS_POLYG(i)%F(1)*nik(1) + TAB_CONTACTS_POLYG(i)%F(2)*nik(2)
+!     !Force_T  = TAB_CONTACTS_POLYG(j)%rt !TAB_CONTACTS_POLYG(i)%F(1)*tik(1) + TAB_CONTACTS_POLYG(i)%F(2)*tik(2)
 
 !     ! Forces on the L frame 
 !     Force_N = Fik(1)*nik(1) + Fik(2)*nik(2)
@@ -4573,16 +4714,16 @@ end subroutine compacity
 !   Fabric = 0.D0
 
 !   do i=1,nb_ligneCONTACT_POLYG
-!     cd = TAB_CONTACT_POLYG(i)%icdent
-!     an = TAB_CONTACT_POLYG(i)%ianent
+!     cd = TAB_CONTACTS_POLYG(i)%icdent
+!     an = TAB_CONTACTS_POLYG(i)%ianent
 
-!     if (TAB_CONTACT_POLYG(i)%nature == 'PLJCx') cycle
-!     if (abs(TAB_CONTACT_POLYG(i)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACT_POLYG(i)%rt) .lt. 1.D-8) cycle
+!     if (TAB_CONTACTS_POLYG(i)%nature == 'PLJCx') cycle
+!     if (abs(TAB_CONTACTS_POLYG(i)%rn) .lt. 1.D-8  .and. abs(TAB_CONTACTS_POLYG(i)%rt) .lt. 1.D-8) cycle
 
-!     !nik_c(1) = TAB_CONTACT_POLYG(i)%n(1)
-!     !nik_c(2) = TAB_CONTACT_POLYG(i)%n(2)
-!     !tik_c(1) = TAB_CONTACT_POLYG(i)%t(1)
-!     !tik_c(2) = TAB_CONTACT_POLYG(i)%t(2)
+!     !nik_c(1) = TAB_CONTACTS_POLYG(i)%n(1)
+!     !nik_c(2) = TAB_CONTACTS_POLYG(i)%n(2)
+!     !tik_c(1) = TAB_CONTACTS_POLYG(i)%t(1)
+!     !tik_c(2) = TAB_CONTACTS_POLYG(i)%t(2)
 
 !     Lik(1) = TAB_POLYG(cd)%center(1)-TAB_POLYG(an)%center(1)
 !     Lik(2) = TAB_POLYG(cd)%center(2)-TAB_POLYG(an)%center(2)
@@ -4593,8 +4734,8 @@ end subroutine compacity
 !     tik(1) = nik(2)
 !     tik(2) = -nik(1)
 
-!     !nik(1)  = TAB_CONTACT_POLYG(i)%n(1)
-!     !nik(2)  = TAB_CONTACT_POLYG(i)%n(2)
+!     !nik(1)  = TAB_CONTACTS_POLYG(i)%n(1)
+!     !nik(2)  = TAB_CONTACTS_POLYG(i)%n(2)
 
 !     Fabric(1,1:2) = nik(1)*nik(1:2) + Fabric(1,1:2)
 !     Fabric(2,1:2) = nik(2)*nik(1:2) + Fabric(2,1:2)
@@ -4711,34 +4852,34 @@ end subroutine compacity
 !     do i=1, n_r_grain
 !       do j=curr_check+1, curr_check+n_c_pp(i)
 !         do k=1, nb_ligneCONTACT
-!           !if (TAB_CONTACT(k)%icdent == 20611 .or. TAB_CONTACT(k)%ianent ==20611) then
-!           !  print*, TAB_CONTACT(k)%icdent, ' ', TAB_CONTACT(k)%ianent, ' ', TAB_CONTACT(k)%nature, ' ', &
-!           !  TAB_CONTACT(k)%status(1:1), ' ', TAB_CONTACT(k)%gap
+!           !if (TAB_CONTACTS(k)%icdent == 20611 .or. TAB_CONTACTS(k)%ianent ==20611) then
+!           !  print*, TAB_CONTACTS(k)%icdent, ' ', TAB_CONTACTS(k)%ianent, ' ', TAB_CONTACTS(k)%nature, ' ', &
+!           !  TAB_CONTACTS(k)%status(1:1), ' ', TAB_CONTACTS(k)%gap
 !           !end if
 !           ! Taking care of polyg polyg contacts only
-!           if (TAB_CONTACT(k)%nature /= 'PLPLx') cycle
+!           if (TAB_CONTACTS(k)%nature /= 'PLPLx') cycle
 
 !           ! Only Checking cohesive contacts
-!           if (TAB_CONTACT(k)%status(1:1) /= 'W') cycle
+!           if (TAB_CONTACTS(k)%status(1:1) /= 'W') cycle
 
 !           ! Index of particles in contact
-!           cd = TAB_CONTACT(k)%icdent
-!           an = TAB_CONTACT(k)%ianent
+!           cd = TAB_CONTACTS(k)%icdent
+!           an = TAB_CONTACTS(k)%ianent
         
 !           if (cd == j) then
 !             ! Check if this is a false positive case
 !             if (an .lt. curr_check .or. an .gt. curr_check+n_c_pp(i)) then
-!               TAB_CONTACT(k)%status = 'noctc'
-!               TAB_CONTACT(k)%gap0   = 0.D0
-!               TAB_CONTACT(k)%cd_len = 0.D0
+!               TAB_CONTACTS(k)%status = 'noctc'
+!               TAB_CONTACTS(k)%gap0   = 0.D0
+!               TAB_CONTACTS(k)%cd_len = 0.D0
 !               cycle
 !             end if
 !           else if (an==j) then
 !             ! Check if this is a false positive case
 !             if (cd .lt. curr_check .or. cd .gt. curr_check+n_c_pp(i)) then
-!               TAB_CONTACT(k)%status = 'noctc'
-!               TAB_CONTACT(k)%gap0   = 0.D0
-!               TAB_CONTACT(k)%cd_len = 0.D0
+!               TAB_CONTACTS(k)%status = 'noctc'
+!               TAB_CONTACTS(k)%gap0   = 0.D0
+!               TAB_CONTACTS(k)%cd_len = 0.D0
 !               cycle
 !             end if
 !           end if
@@ -4746,10 +4887,10 @@ end subroutine compacity
 !           ! There's the case that it is inside the particle but it is not adjacent!
 !           ! If they are too far away... we need to skip!!!
 !           ! By hand! CAREFULL. 10% of Wth!!!
-!           if (TAB_CONTACT(k)%gap > (0.2000000D-01/20)) then
-!             TAB_CONTACT(k)%status = 'noctc'
-!             TAB_CONTACT(k)%gap0   = 0.D0
-!             TAB_CONTACT(k)%cd_len = 0.D0
+!           if (TAB_CONTACTS(k)%gap > (0.2000000D-01/20)) then
+!             TAB_CONTACTS(k)%status = 'noctc'
+!             TAB_CONTACTS(k)%gap0   = 0.D0
+!             TAB_CONTACTS(k)%cd_len = 0.D0
 !           end if
 !         end do
 !       end do
@@ -4769,47 +4910,47 @@ end subroutine compacity
 !     do i=1, nb_ligneCONTACT
       
 !       ! Index of particles in contact
-!       cd = TAB_CONTACT(i)%icdent
-!       an = TAB_CONTACT(i)%ianent
-!       l_cdver = TAB_CONTACT(i)%cdver
+!       cd = TAB_CONTACTS(i)%icdent
+!       an = TAB_CONTACTS(i)%ianent
+!       l_cdver = TAB_CONTACTS(i)%cdver
       
-!       if (TAB_CONTACT(i)%nature == 'PLPLx') then
+!       if (TAB_CONTACTS(i)%nature == 'PLPLx') then
 !         l_counter_plpl = l_counter_plpl + 1 
 !         write(123,'(A6,2X,A5,2X,I7)')'$icdan','PLPLx',i
 !         write(123,'(A90)') ' cdbdy  numbr  cdtac  numbr  vertx  numbr  behav  anbdy  numbr  antac  numbr  segmt  numbr  sttus  iadj'
 !         write(123,'(1X,A5,2X,I5,2X,A5,2X,I5,2X,A5,2X,I5,2X,A5,2X,A5,2X,I5,2X,A5,2X,I5,2X,A5,2X,I5,2X,A5,1X,I5)') &
-!         'RBDY2', cd,'POLYG', 1, 'CDVER', l_cdver, TAB_CONTACT(i)%law, 'RBDY2', an,'POLYG',1, 'ANSEG', TAB_CONTACT(i)%sect, &
-!         TAB_CONTACT(i)%status, an
-!       else if (TAB_CONTACT(i)%nature == 'PLJCx') then
+!         'RBDY2', cd,'POLYG', 1, 'CDVER', l_cdver, TAB_CONTACTS(i)%law, 'RBDY2', an,'POLYG',1, 'ANSEG', TAB_CONTACTS(i)%sect, &
+!         TAB_CONTACTS(i)%status, an
+!       else if (TAB_CONTACTS(i)%nature == 'PLJCx') then
 !         l_counter_pljc = l_counter_pljc + 1 
 !         write(123,'(A6,2X,A5,2X,I7)')'$icdan','PLJCx', (i - l_counter_plpl)
 !         write(123,'(A103)') &
 !         ' cdbdy  numbr  cdtac  numbr  vertx  numbr  behav  anbdy  numbr  antac  numbr                sttus iadj '
 !         write(123,'(1X,A5,2X,I5,2X,A5,2X,I5,2X,A5,2X,I5,2X,A5,2X,A5,2X,I5,2X,A5,2X,I5,16X,A5,1X,I5)')   &
-!         'RBDY2',cd,'POLYG', 1,'CDVER',l_cdver, TAB_CONTACT(i)%law, 'RBDY2', an,'JONCx', 1, TAB_CONTACT(i)%status, &
-!         TAB_CONTACT(i)%adj
-!       else if (TAB_CONTACT(i)%nature == 'PTPT2') then
+!         'RBDY2',cd,'POLYG', 1,'CDVER',l_cdver, TAB_CONTACTS(i)%law, 'RBDY2', an,'JONCx', 1, TAB_CONTACTS(i)%status, &
+!         TAB_CONTACTS(i)%adj
+!       else if (TAB_CONTACTS(i)%nature == 'PTPT2') then
 !         write(123,'(A6,2X,A5,2X,I7)')'$icdan','PTPT2', (i - l_counter_plpl - l_counter_pljc)
 !         WRITE(123,'(A76)')' cdbdy  numbr  cdtac  numbr  behav  anbdy  numbr  antac  numbr  sttus   iadj'      
 !         WRITE(123,'(1X,A5,2X,I5,2X,A5,2X,I5,2X,A5,2X,A5,2X,I5,2X,A5,2X,I5,2X,A5,2X,I5)')   &
-!         'RBDY2', cd,'PT2Dx', 2, TAB_CONTACT(i)%law, 'RBDY2', an,'PT2Dx', 2,  TAB_CONTACT(i)%status, TAB_CONTACT(i)%adj
+!         'RBDY2', cd,'PT2Dx', 2, TAB_CONTACTS(i)%law, 'RBDY2', an,'PT2Dx', 2,  TAB_CONTACTS(i)%status, TAB_CONTACTS(i)%adj
 !       else
 !         print*, 'Queeeeeee!'
 !         stop
 !       end if
       
-!       write(123,104) 'rlt/H', TAB_CONTACT(i)%rt         ,'rln/H', TAB_CONTACT(i)%rn         ,'rls/H', 0.0000000D+00
-!       write(123,104) 'vlt =', TAB_CONTACT(i)%vt         ,'vln =', TAB_CONTACT(i)%vn         ,'vls =', 0.0000000D+00
-!       write(123,103) 'gapTT', TAB_CONTACT(i)%gap
-!       write(123,104) 'n(1)=', TAB_CONTACT(i)%n(1)       ,'n(2)=', TAB_CONTACT(i)%n(2)       ,'n(3)=',TAB_CONTACT(i)%n(3)
-!       write(123,104) 'coo1=', TAB_CONTACT(i)%coor_ctc(1),'coo2=', TAB_CONTACT(i)%coor_ctc(2),'coo3=',TAB_CONTACT(i)%coor_ctc(3)
+!       write(123,104) 'rlt/H', TAB_CONTACTS(i)%rt         ,'rln/H', TAB_CONTACTS(i)%rn         ,'rls/H', 0.0000000D+00
+!       write(123,104) 'vlt =', TAB_CONTACTS(i)%vt         ,'vln =', TAB_CONTACTS(i)%vn         ,'vls =', 0.0000000D+00
+!       write(123,103) 'gapTT', TAB_CONTACTS(i)%gap
+!       write(123,104) 'n(1)=', TAB_CONTACTS(i)%n(1)       ,'n(2)=', TAB_CONTACTS(i)%n(2)       ,'n(3)=',TAB_CONTACTS(i)%n(3)
+!       write(123,104) 'coo1=', TAB_CONTACTS(i)%coor_ctc(1),'coo2=', TAB_CONTACTS(i)%coor_ctc(2),'coo3=',TAB_CONTACTS(i)%coor_ctc(3)
       
-!       if (TAB_CONTACT(i)%nature == 'PLPLx') then
+!       if (TAB_CONTACTS(i)%nature == 'PLPLx') then
 !         write(123,'(A)') '#  gapTTbegin      cd_length       disp_t                                  '
-!         write(123,'(3(1X,D14.7))') TAB_CONTACT(i)%gap0, TAB_CONTACT(i)%cd_len, TAB_CONTACT(i)%tang_disp
-!       else if (TAB_CONTACT(i)%nature == 'PTPT2') then
+!         write(123,'(3(1X,D14.7))') TAB_CONTACTS(i)%gap0, TAB_CONTACTS(i)%cd_len, TAB_CONTACTS(i)%tang_disp
+!       else if (TAB_CONTACTS(i)%nature == 'PTPT2') then
 !         write(123,'(A)') '#gapREF                                                                    '
-!         write(123,'(1X,D14.7)') TAB_CONTACT(i)%gap0
+!         write(123,'(1X,D14.7)') TAB_CONTACTS(i)%gap0
 !       end if
 !       write(123,*) ' '
 !     end do
@@ -5209,1815 +5350,6 @@ end subroutine compacity
 !   write(1005,'(A6)')'$$$$$$'
 
 ! end subroutine construct_bodies
-
-! !==============================================================================
-! ! Fermeture des fichiers
-! !==============================================================================
-
-!  subroutine close_all
-!  implicit none
- 
-!    if (calcul_coordination              == 1)  close (100)
-!    if (calcul_vitesse_moyenne           == 1)  close (101)
-!    if (calcul_compacity                 == 1)  close (102)
-!    if (calcul_qoverp                    == 1)  close (103)
-!    if (calcul_anisotropy_contact        == 1)  close (104)
-!    if (calcul_anisotropy_force          == 1)  close (105)
-!    if (calcul_anisotropy_branch         == 1)  close (106)
-! !   if (calcul_persiste_contact          == 1)  close (106)
-!    if (walls_position                   == 1)  close (108)
-!    if (walls_f                          == 1)  close (109)
-!    if (c_n_ctc_probability              == 1)  close (111)
-!    if (c_fail_mode                      == 1)  close (113)
-!    if (c_sign_aniso                     == 1)  close (117)
-!    if (c_avg_shape_ratio                == 1)  close (124)
-!    if (c_sign_aniso_l                     == 1)  close (125)
-!   end subroutine close_all
-
-! !==============================================================================
-! !==============================================================================
-! !==============================================================================
-! !==============================================================================
-
-! !==============================================================================
-! !==============================================================================
-! !==============================================================================
-! !==============================================================================
-
-
-! !---------------------------------------------------
-! ! subroutine pour calculer les vecteurs et valeurs
-! ! propre d'une matrice N*N
-! !---------------------------------------------------
-! subroutine rg(lda, n, a, wr, wi, matz, z, ierror )
-! !
-! !*******************************************************************************
-! !
-! !! RG finds the eigenvalues and eigenvectors of a real(kind=8) general matrix.
-! !
-! !
-! !  Modified:
-! !
-! !    01 May 2000
-! !
-! !  Parameters:
-! !
-! !    Input, integer LDA, the leading dimension of A and Z.
-! !    LDA must be at least N.
-! !
-! !    Input, integer N, the number of rows and columns of A.
-! !
-! !    Input/output, real(kind=8) A(LDA,N).
-! !
-! !    On input, A contains the N by N matrix whose eigenvalues and
-! !    eigenvectors are desired.
-! !
-! !    On output, A has been overwritten by other information.
-! !
-! !    Output, real(kind=8) WR(N), WI(N), contain the real(kind=8) and imaginary parts,
-! !    respectively, of the eigenvalues.  Complex conjugate
-! !    pairs of eigenvalues appear consecutively with the
-! !    eigenvalue having the positive imaginary part first.
-! !
-! !    Input, integer MATZ, zero if only eigenvalues are desired.
-! !    non-zero, for both eigenvalues and eigenvectors.
-! !
-! !    Output, real(kind=8) Z(LDA,N), contains the real(kind=8) and imaginary parts of
-! !    the eigenvectors if MATZ is not zero.  If the J-th eigenvalue
-! !    is real(kind=8), the J-th column of Z contains its eigenvector.  If the
-! !    J-th eigenvalue is complex with positive imaginary part, the
-! !    J-th and (J+1)-th columns of Z contain the real(kind=8) and
-! !    imaginary parts of its eigenvector.  The conjugate of this
-! !    vector is the eigenvector for the conjugate eigenvalue.
-! !
-! !    Output, integer IERROR, error flag.
-! !    0, no error.
-! !    nonzero, an error occurred.
-! !
-!   implicit none
-! !
-!   integer lda
-!   integer n
-!   integer nm
-! !
-!   real(kind=8) a(lda,n)
-!   real(kind=8) fv1(n)
-!   integer ierror
-!   integer is1
-!   integer is2
-!   integer iv1(n)
-!   integer matz
-!   real(kind=8) wi(n)
-!   real(kind=8) wr(n)
-!   real(kind=8) z(lda,n)
-! !
-!   ierror = 0
-
-!   if ( n > lda ) then
-!     ierror = 10 * n
-!     return
-!   end if
-! !
-! !  Balance the matrix.
-! !
-!   call balanc ( lda, n, a, is1, is2, fv1 )
-! !
-! !  Put the matrix into upper Hessenberg form.
-! !
-!   call elmhes ( lda, n, is1, is2, a, iv1 )
-
-!   if ( matz == 0 ) then
-
-!     call hqr ( lda, n, is1, is2, a, wr, wi, ierror )
-
-!     if ( ierror /= 0 ) then
-!       return
-!     end if
-
-!   else
-
-!     call eltran ( lda, n, is1, is2, a, iv1, z )
-
-!     call hqr2 ( lda, n, is1, is2, a, wr, wi, z, ierror )
-
-!     if ( ierror /= 0 ) then
-!       return
-!     end if
-
-!     call balbak ( lda, n, is1, is2, fv1, n, z )
-
-!   end if
-
-! end subroutine rg
-
-! subroutine balanc ( nm, n, a, low, igh, scale )
-! !
-! !*******************************************************************************
-! !
-! !! BALANC balances a real(kind=8) matrix before eigenvalue calculations.
-! !
-! !
-! !  Discussion:
-! !
-! !    This subroutine balances a real(kind=8) matrix and isolates eigenvalues
-! !    whenever possible.
-! !
-! !    Suppose that the principal submatrix in rows LOW through IGH
-! !    has been balanced, that P(J) denotes the index interchanged
-! !    with J during the permutation step, and that the elements
-! !    of the diagonal matrix used are denoted by D(I,J).  Then
-! !
-! !      SCALE(J) = P(J),    J = 1,...,LOW-1,
-! !               = D(J,J),  J = LOW,...,IGH,
-! !               = P(J)     J = IGH+1,...,N.
-! !
-! !    The order in which the interchanges are made is N to IGH+1,
-! !    then 1 to LOW-1.
-! !
-! !    Note that 1 is returned for LOW if IGH is zero formally.
-! !
-! !  Reference:
-! !
-! !    J H Wilkinson and C Reinsch,
-! !    Handbook for Automatic Computation,
-! !    Volume II, Linear Algebra, Part 2,
-! !    Springer Verlag, 1971.
-! !
-! !    B Smith, J Boyle, J Dongarra, B Garbow, Y Ikebe, V Klema, C Moler,
-! !    Matrix Eigensystem Routines, EISPACK Guide,
-! !    Lecture Notes in Computer Science, Volume 6,
-! !    Springer Verlag, 1976.
-! !
-! !  Modified:
-! !
-! !    15 March 2001
-! !
-! !  Parameters:
-! !
-! !    Input, integer NM, the leading dimension of A, which must
-! !    be at least N.
-! !
-! !    Input, integer N, the order of the matrix.
-! !
-! !    Input/output, real(kind=8) A(NM,N), the N by N matrix.  On output,
-! !    the matrix has been balanced.
-! !
-! !    Output, integer LOW, IGH, indicate that A(I,J) is equal to zero if
-! !    (1) I is greater than J and
-! !    (2) J=1,...,LOW-1 or I=IGH+1,...,N.
-! !
-! !    Output, real(kind=8) SCALE(N), contains information determining the
-! !    permutations and scaling factors used.
-! !
-!   implicit none
-! !
-!   integer nm
-!   integer n
-! !
-!   real(kind=8) a(nm,n)
-!   real(kind=8) b2
-!   real(kind=8) c
-!   real(kind=8) f
-!   real(kind=8) g
-!   integer i
-!   integer iexc
-!   integer igh
-!   integer j
-!   integer k
-!   integer l
-!   integer low
-!   integer m
-!   logical noconv
-!   real(kind=8) r
-!   real(kind=8), parameter :: radix = 16.0D+00
-!   real(kind=8) s
-!   real(kind=8) scale(n)
-! !
-!   iexc = 0
-!   j = 0
-!   m = 0
-
-!   b2 = radix**2
-!   k = 1
-!   l = n
-!   go to 100
-
-! 20 continue
-
-!   scale(m) = j
-
-!   if ( j /= m ) then
-
-!     do i = 1, l
-!       call r_swap ( a(i,j), a(i,m) )
-!     end do
-
-!     do i = k, n
-!       call r_swap ( a(j,i), a(m,i) )
-!     end do
-
-!   end if
-
-!   continue
-
-!   if ( iexc == 2 ) go to 130
-! !
-! !  Search for rows isolating an eigenvalue and push them down.
-! !
-!  continue
-
-!   if ( l == 1 ) then
-!     low = k
-!     igh = l
-!     return
-!   end if
-
-!   l = l - 1
-
-! 100 continue
-
-!   do j = l, 1, -1
-
-!      do i = 1, l
-!        if ( i /= j ) then
-!          if ( a(j,i) /= 0.0D+00 ) then
-!            go to 120
-!          end if
-!        end if
-!      end do
-
-!      m = l
-!      iexc = 1
-!      go to 20
-
-! 120  continue
-
-!   end do
-
-!   go to 140
-! !
-! !  Search for columns isolating an eigenvalue and push them left.
-! !
-! 130 continue
-
-!   k = k + 1
-
-! 140 continue
-
-!   do j = k, l
-
-!     do i = k, l
-!       if ( i /= j ) then
-!         if ( a(i,j) /= 0.0D+00 ) then
-!           go to 170
-!         end if
-!       end if
-!     end do
-
-!     m = k
-!     iexc = 2
-!     go to 20
-
-! 170 continue
-
-!   end do
-! !
-! !  Balance the submatrix in rows K to L.
-! !
-!   scale(k:l) = 1.0D+00
-! !
-! !  Iterative loop for norm reduction.
-! !
-!   noconv = .true.
-
-!   do while ( noconv )
-
-!     noconv = .false.
-
-!     do i = k, l
-
-!       c = 0.0D+00
-!       r = 0.0D+00
-
-!       do j = k, l
-!         if ( j /= i ) then
-!           c = c + abs ( a(j,i) )
-!           r = r + abs ( a(i,j) )
-!         end if
-!       end do
-! !
-! !  Guard against zero C or R due to underflow.
-! !
-!       if ( c /= 0.0D+00 .and. r /= 0.0D+00 ) then
-
-!         g = r / radix
-!         f = 1.0D+00
-!         s = c + r
-
-!         do while ( c < g )
-!           f = f * radix
-!           c = c * b2
-!         end do
-
-!         g = r * radix
-
-!         do while ( c >= g )
-!           f = f / radix
-!           c = c / b2
-!         end do
-! !
-! !  Balance.
-! !
-!         if ( ( c + r ) / f < 0.95D+00 * s ) then
-
-!           g = 1.0D+00 / f
-!           scale(i) = scale(i) * f
-!           noconv = .true.
-
-!           a(i,k:n) = a(i,k:n) * g
-!           a(1:l,i) = a(1:l,i) * f
-
-!         end if
-
-!       end if
-
-!     end do
-
-!   end do
-
-!   low = k
-!   igh = l
-
-
-! end subroutine balanc
-! subroutine balbak ( lda, n, low, igh, scale, m, z )
-! !
-! !*******************************************************************************
-! !
-! !! BALBAK back transforms eigenvectors to undo the effect of BALANC.
-! !
-! !
-! !  Discussion:
-! !
-! !    This subroutine forms the eigenvectors of a real(kind=8) general
-! !    matrix by back transforming those of the corresponding
-! !    balanced matrix determined by BALANC.
-! !
-! !  Reference:
-! !
-! !    Parlett and Reinsch,
-! !    Numerische Mathematik,
-! !    Volume 13, pages 293-304, 1969.
-! !
-! !    J H Wilkinson and C Reinsch,
-! !    Handbook for Automatic Computation,
-! !    Volume II, Linear Algebra, Part 2,
-! !    Springer Verlag, 1971.
-! !
-! !    B Smith, J Boyle, J Dongarra, B Garbow, Y Ikebe, V Klema, C Moler,
-! !    Matrix Eigensystem Routines, EISPACK Guide,
-! !    Lecture Notes in Computer Science, Volume 6,
-! !    Springer Verlag, 1976.
-! !
-! !  Modified:
-! !
-! !    18 February 2001
-! !
-! !  Parameters:
-! !
-! !    Input, integer LDA, the leading dimension of Z.
-! !
-! !    Input, integer N, the order of the matrix.
-! !
-! !    Input, integer LOW, IGH, column indices determined by BALANC.
-! !
-! !    Input, real(kind=8) SCALE(N), contains information determining
-! !    the permutations and scaling factors used by BALANC.
-! !
-! !    Input, integer M, the number of columns of Z to be back-transformed.
-! !
-! !    Input/output, real(kind=8) Z(LDA,M), contains the real(kind=8) and imaginary parts
-! !    of the eigenvectors, which, on return, have been back-transformed.
-! !
-!   implicit none
-! !
-!   integer lda
-!   integer m
-!   integer n
-! !
-!   integer i
-!   integer igh
-!   integer ii
-!   integer j
-!   integer k
-!   integer low
-!   real(kind=8) scale(n)
-!   real(kind=8) z(lda,m)
-! !
-!   if ( m <= 0 ) then
-!     return
-!   end if
-
-!   if ( igh /= low ) then
-!     do i = low, igh
-!       z(i,1:m) = scale(i) * z(i,1:m)
-!     end do
-!   end if
-
-!   do ii = 1, n
-
-!     i = ii
-
-!     if ( i < low .or. i > igh ) then
-
-!       if ( i < low ) then
-!         i = low - ii
-!       end if
-
-!       k = int ( scale(i) )
-
-!       if ( k /= i ) then
-
-!         do j = 1, m
-!           call r_swap ( z(i,j), z(k,j) )
-!         end do
-
-!       end if
-
-!     end if
-
-!   end do
-
-
-! end subroutine balbak
-
-! subroutine elmhes ( lda, n, low, igh, a, jint )
-! !
-! !*******************************************************************************
-! !
-! !! ELMHES reduces all, or a portion of a matrix, to upper Hessenberg form.
-! !
-! !
-! !  Discussion:
-! !
-! !    The routine uses stabilized elementary similarity transformations.
-! !
-! !  Modified:
-! !
-! !    15 March 2001
-! !
-! !  Parameters:
-! !
-! !    Input, integer LDA, the leading dimension of A.
-! !
-! !    Input, integer N, the number of rows and columns in A.
-! !
-! !    Input, integer LOW, IGH.  If subroutine BALANC was called
-! !    before ELMHES, then it will set LOW and IGH.  If BALANC
-! !    was not called, then the user should set LOW = 1 and IGH=N.
-! !
-! !    Input/output, real(kind=8) A(LDA,N).
-! !
-! !    On input, A contains the matrix to be transformed.
-! !
-! !    On output, A contains the Hessenberg matrix.  The multipliers
-! !    which were used in the reduction are stored in the
-! !    remaining triangle under the Hessenberg matrix.
-! !
-! !    Output, integer JINT(IGH), contains information on the rows
-! !    and columns interchanged in the reduction.
-! !    Only elements LOW through IGH are used.
-! !
-!   implicit none
-! !
-!   integer igh
-!   integer lda
-!   integer n
-! !
-!   real(kind=8) a(lda,n)
-!   integer i
-!   integer j
-!   integer jint(igh)
-!   integer low
-!   integer m
-!   real(kind=8) x
-!   real(kind=8) y
-! !
-!   do m = low+1, igh-1
-! !
-! !  Look for the largest element in the column A(J,M-1), where
-! !  J goes from M to IGH.   Store the row number as I.
-! !
-!     x = 0.0D+00
-!     i = m
-
-!     do j = m, igh
-
-!       if ( abs ( a(j,m-1) ) > abs ( x ) ) then
-!         x = a(j,m-1)
-!         i = j
-!       end if
-
-!     end do
-
-!     jint(m) = i
-! !
-! !  If I is not M, interchange rows and columns I and M of A.
-! !
-!     if ( i /= m ) then
-
-!       do j = m-1, n
-!         call r_swap ( a(i,j), a(m,j) )
-!       end do
-
-!       do j = 1, igh
-!         call r_swap ( a(j,i), a(j,m) )
-!       end do
-
-!     end if
-
-!     if ( x /= 0.0D+00 ) then
-
-!       do i = m+1, igh
-!         y = a(i,m-1)
-
-!         if ( y /= 0.0D+00 ) then
-
-!           y = y / x
-!           a(i,m-1) = y
-!           a(i,m:n) = a(i,m:n) - y * a(m,m:n)
-
-!           do j = 1, igh
-!             a(j,m) = a(j,m) + y * a(j,i)
-!           end do
-
-!         end if
-
-!       end do
-
-!     end if
-
-!   end do
-
-
-! end subroutine elmhes
-! subroutine eltran ( lda, n, low, igh, a, jint, z )
-! !
-! !*******************************************************************************
-! !
-! !! ELTRAN accumulates transformations used by ELMHES.
-! !
-! !
-! !  Modified:
-! !
-! !    15 March 2001
-! !
-! !  Parameters:
-! !
-! !    Input, integer LDA, the leading dimension of A and Z.
-! !
-! !    Input, integer N, the number of rows and columns in A.
-! !
-! !    Input, integer LOW, IGH.  If BALANC was called
-! !    before ELMHES, then it will set LOW and IGH.  If BALANC
-! !    was not called, then the user should set LOW = 1 and IGH=N.
-! !
-! !    Input, integer A(LDA,N), contains, in its lower triangle,
-! !    the multipliers used by ELMHES in the reduction.
-! !
-! !    Input, integer JINT(IGH), contains information on the rows
-! !    and columns interchanged in the reduction.
-! !
-! !    Output, real(kind=8) Z(LDA,N), contains the transformation matrix
-! !    produced in the reduction by ELMHES.
-! !
-!   implicit none
-! !
-!   integer igh
-!   integer lda
-!   integer n
-! !
-!   real(kind=8) a(lda,igh)
-!   integer i
-!   integer j
-!   integer jint(igh)
-!   integer low
-!   integer mm
-!   integer mp
-!   real(kind=8) z(lda,n)
-! !
-! !  Initialize Z to the identity matrix.
-! !
-!   call rmat_identity ( lda, n, z )
-
-!   do mm = 1, igh-low-1
-
-!     mp = igh - mm
-
-!     do i = mp+1, igh
-!       z(i,mp) = a(i,mp-1)
-!     end do
-
-!     i = jint(mp)
-
-!     if ( i /= mp ) then
-
-!       do j = mp, igh
-!         z(mp,j) = z(i,j)
-!         z(i,j) = 0.0D+00
-!       end do
-
-!       z(i,mp) = 1.0D+00
-
-!     end if
-
-!   end do
-
-
-! end subroutine eltran
-
-! subroutine hqr ( lda, n, low, igh, h, wr, wi, ierror )
-! !
-! !*******************************************************************************
-! !
-! !! HQR finds the eigenvalues of a real(kind=8) upper Hessenberg matrix by the QR method.
-! !
-! !
-! !  Modified:
-! !
-! !    15 March 2001
-! !
-! !  Parameters:
-! !
-! !    Input, integer LDA, the leading dimension of H.  LDA must be
-! !    at least N.
-! !
-! !    Input, integer N, the number of rows and columns in the matrix.
-! !
-! !    Input, integer LOW, IGH, column indices determined by
-! !    BALANC.  If BALANC is not used, set LOW = 1, IGH=N.
-! !
-! !    Input/output, real(kind=8) H(LDA,N).
-! !
-! !    On input, H contains the upper Hessenberg matrix.  Information
-! !    about the transformations used in the reduction to Hessenberg
-! !    form by ELMHES or ORTHES, if performed, is stored
-! !    in the remaining triangle under the Hessenberg matrix.
-! !
-! !    On output, the information that was in H has been destroyed.
-! !
-! !    Output, real(kind=8) WR(N), WI(N), contain the real(kind=8) and imaginary parts,
-! !    respectively, of the eigenvalues.  The eigenvalues
-! !    are unordered except that complex conjugate pairs
-! !    of values appear consecutively with the eigenvalue
-! !    having the positive imaginary part first.  If an
-! !    error exit is made, the eigenvalues should be correct
-! !    for indices IERROR+1 through N.
-! !
-! !    Output, integer IERROR, error flag.
-! !    0, no error occurred.
-! !    J, if the limit of 30*N iterations is exhausted
-! !    while the J-th eigenvalue is being sought.
-! !
-!   implicit none
-! !
-!   integer lda
-!   integer n
-! !
-!   integer en
-!   integer enm2
-!   real(kind=8) h(lda,n)
-!   real(kind=8) hnorm
-!   integer i
-!   integer ierror
-!   integer igh
-!   integer itn
-!   integer its
-!   integer j
-!   integer k
-!   integer l
-!   integer ll
-!   integer low
-!   integer m
-!   integer mm
-!   integer na
-!   logical notlas
-!   real(kind=8) p
-!   real(kind=8) q
-!   real(kind=8) r
-!   real(kind=8) s
-!   real(kind=8) t
-!   real(kind=8) tst1
-!   real(kind=8) tst2
-!   real(kind=8) w
-!   real(kind=8) wi(n)
-!   real(kind=8) wr(n)
-!   real(kind=8) x
-!   real(kind=8) y
-!   real(kind=8) zz
-! !
-!   ierror = 0
-! !
-! !  Compute the norm of the upper Hessenberg matrix.
-! !
-!   hnorm = 0.0D+00
-!   do i = 1, n
-!     do j = max ( i-1, 1 ), n
-!       hnorm = hnorm + abs ( h(i,j) )
-!     end do
-!   end do
-! !
-! !  Store roots isolated by BALANC.
-! !
-!   do i = 1, n
-
-!     if (i < low .or. i > igh ) then
-!       wr(i) = h(i,i)
-!       wi(i) = 0.0D+00
-!     end if
-
-!   end do
-
-!   en = igh
-!   t = 0.0D+00
-!   itn = 60 * n
-! !
-! !  Search for next eigenvalues.
-! !
-!    60 continue
-
-!   if ( en < low ) then
-!     return
-!   end if
-
-!   its = 0
-!   na = en - 1
-!   enm2 = na - 1
-! !
-! !  Look for single small sub-diagonal element.
-! !
-!    70 continue
-
-!   do ll = low, en
-
-!     l = en + low - ll
-!     if ( l == low ) then
-!       exit
-!     end if
-
-!     s = abs ( h(l-1,l-1) ) + abs ( h(l,l) )
-!     if ( s == 0.0D+00 ) then
-!       s = hnorm
-!     end if
-
-!     tst1 = s
-!     tst2 = tst1 + abs ( h(l,l-1) )
-!     if ( tst2 == tst1 ) then
-!       exit
-!     end if
-
-!   end do
-! !
-! !  Form shift.
-! !
-!   x = h(en,en)
-
-!   if ( l == en ) then
-!     wr(en) = x + t
-!     wi(en) = 0.0D+00
-!     en = na
-!     go to 60
-!   end if
-
-!   y = h(na,na)
-!   w = h(en,na) * h(na,en)
-!   if ( l == na) then
-!     go to 280
-!   end if
-
-!   if ( itn == 0 ) then
-!     ierror = en
-!     return
-!   end if
-! !
-! !  Form exceptional shift.
-! !
-!   if ( its == 10 .or. its == 20 ) then
-
-!     t = t + x
-
-!     do i = low, en
-!       h(i,i) = h(i,i) - x
-!     end do
-
-!     s = abs ( h(en,na) ) + abs ( h(na,enm2) )
-!     x = 0.75D+00 * s
-!     y = x
-!     w = -0.4375D+00 * s * s
-
-!   end if
-
-!   its = its + 1
-!   itn = itn - 1
-! !
-! !  Look for two consecutive small sub-diagonal elements.
-! !
-!   do mm = l, enm2
-
-!     m = enm2 + l - mm
-!     zz = h(m,m)
-!     r = x - zz
-!     s = y - zz
-!     p = (r * s - w) / h(m+1,m) + h(m,m+1)
-!     q = h(m+1,m+1) - zz - r - s
-!     r = h(m+2,m+1)
-!     s = abs ( p ) + abs ( q ) + abs ( r )
-!     p = p / s
-!     q = q / s
-!     r = r / s
-!     if ( m == l ) then
-!       exit
-!     end if
-
-!     tst1 = abs ( p ) * ( abs ( h(m-1,m-1) ) + abs ( zz ) + abs ( h(m+1,m+1) ) )
-!     tst2 = tst1 + abs ( h(m,m-1) ) * ( abs ( q ) + abs ( r ) )
-!     if ( tst2 == tst1 ) then
-!       exit
-!     end if
-
-!   end do
-
-!   do i = m+2, en
-!     h(i,i-2) = 0.0D+00
-!     if ( i /= m+2 ) then
-!       h(i,i-3) = 0.0D+00
-!     end if
-!   end do
-! !
-! !  Double QR step involving rows l to en and columns m to en.
-! !
-!   do k = m, na
-
-!     notlas = k /= na
-
-!     if ( k /= m ) then
-
-!       p = h(k,k-1)
-!       q = h(k+1,k-1)
-!       r = 0.0D+00
-!       if ( notlas ) then
-!         r = h(k+2,k-1)
-!       end if
-
-!       x = abs ( p ) + abs ( q ) + abs ( r )
-!       if ( x == 0.0D+00 ) then
-!         cycle
-!       end if
-
-!       p = p / x
-!       q = q / x
-!       r = r / x
-!     end if
-
-!     s = sign ( sqrt ( p*p+q*q+r*r), p )
-
-!     if ( k /= m ) then
-!       h(k,k-1) = -s * x
-!     else
-!       if ( l /= m ) then
-!         h(k,k-1) = -h(k,k-1)
-!       end if
-!     end if
-
-!     p = p + s
-!     x = p / s
-!     y = q / s
-!     zz = r / s
-!     q = q / p
-!     r = r / p
-
-!     if ( .not. notlas ) then
-! !
-! !  Row modification.
-! !
-!       do j = k, n
-!         p = h(k,j) + q * h(k+1,j)
-!         h(k,j) = h(k,j) - p * x
-!         h(k+1,j) = h(k+1,j) - p * y
-!       end do
-
-!       j = min ( en, k+3 )
-! !
-! !  Column modification.
-! !
-!       do i = 1, j
-!         p = x * h(i,k) + y * h(i,k+1)
-!         h(i,k) = h(i,k) - p
-!         h(i,k+1) = h(i,k+1) - p * q
-!       end do
-
-!     else
-! !
-! !  Row modification.
-! !
-!       do j = k, n
-!         p = h(k,j) + q * h(k+1,j) + r * h(k+2,j)
-!         h(k,j) = h(k,j) - p * x
-!         h(k+1,j) = h(k+1,j) - p * y
-!         h(k+2,j) = h(k+2,j) - p * zz
-!       end do
-
-!       j = min(en,k+3)
-! !
-! !  Column modification.
-! !
-!       do i = 1, j
-!         p = x * h(i,k) + y * h(i,k+1) + zz * h(i,k+2)
-!         h(i,k) = h(i,k) - p
-!         h(i,k+1) = h(i,k+1) - p * q
-!         h(i,k+2) = h(i,k+2) - p * r
-!       end do
-
-!     end if
-
-!   end do
-
-!   go to 70
-! !
-! !  Two roots found.
-! !
-!   280 continue
-
-!   p = ( y - x ) / 2.0D+00
-!   q = p * p + w
-!   zz = sqrt ( abs ( q ) )
-!   x = x + t
-! !
-! !  Real(Kind=8) pair.
-! !
-!   if (q >= 0.0D+00 ) then
-!     zz = p + sign(zz,p)
-!     wr(na) = x + zz
-!     if ( zz == 0.0D+00 ) then
-!       wr(en) = wr(na)
-!     else
-!       wr(en) = x - w / zz
-!     end if
-!     wi(na) = 0.0D+00
-!     wi(en) = 0.0D+00
-! !
-! !  Complex pair.
-! !
-!   else
-!     wr(na) = x + p
-!     wr(en) = x + p
-!     wi(na) = zz
-!     wi(en) = -zz
-!   end if
-! !
-! !  Deduct the two eigenvalues we have found from the total to
-! !  be found, and proceed.
-! !
-!   en = enm2
-
-!   go to 60
-! end subroutine hqr
-! subroutine hqr2 ( lda, n, low, igh, h, wr, wi, z, ierror )
-! !
-! !*******************************************************************************
-! !
-! !! HQR2 finds the eigenvalues and eigenvectors of a real(kind=8) upper Hessenberg matrix by the QR method.
-! !
-! !
-! !  Modified:
-! !
-! !    15 March 2001
-! !
-! !  Parameters:
-! !
-! !    Input, integer LDA, the leading dimension of H and Z.
-! !    LDA must be at least N.
-! !
-! !    Input, integer N, the number of rows and columns in the
-! !    matrix H.
-! !
-! !    Input, integer LOW, IGH, column indices determined by
-! !    BALANC.  If BALANC is not used, set LOW = 1, IGH=N.
-! !
-! !    Input/output, real(kind=8) H(LDA,N).
-! !    On input, H contains the upper Hessenberg matrix.
-! !    On output, the information that was in H has been destroyed.
-! !
-! !    Output, real(kind=8) WR(N), WI(N), contain the real(kind=8) and imaginary parts,
-! !    respectively, of the eigenvalues.  The eigenvalues
-! !    are unordered except that complex conjugate pairs
-! !    of values appear consecutively with the eigenvalue
-! !    having the positive imaginary part first.  If an
-! !    error exit is made, the eigenvalues should be correct
-! !    for indices IERROR+1 through N.
-! !
-! !    Input/output, real(kind=8) Z(LDA,N).
-! !
-! !    On input, Z contains the transformation matrix produced by
-! !    ELTRAN after the reduction by ELMHES if performed.  If the
-! !    eigenvectors of the Hessenberg matrix are desired, Z must
-! !    contain the identity matrix.
-! !
-! !    On output, Z contains the real(kind=8) and imaginary parts of the
-! !    eigenvectors.  If the I-th eigenvalue is real(kind=8), the I-th column
-! !    of Z contains its eigenvector.  If the I-th eigenvalue is complex
-! !    with positive imaginary part, the I-th and (I+1)-th
-! !    columns of Z contain the real(kind=8) and imaginary parts of its
-! !    eigenvector.  The eigenvectors are unnormalized.  If an
-! !    error exit is made, none of the eigenvectors has been found.
-! !
-! !    Output, integer IERROR, error flag.
-! !    0, no error occurred.
-! !    J, if the limit of 30*N iterations is exhausted
-! !    while the J-th eigenvalue is being sought.
-! !
-!   implicit none
-! !
-!   integer lda
-!   integer n
-! !
-!   integer en
-!   integer enm2
-!   real(kind=8) h(lda,n)
-!   real(kind=8) hnorm
-!   integer i
-!   integer ierror
-!   integer igh
-!   integer ii
-!   integer itn
-!   integer its
-!   integer j
-!   integer jj
-!   integer k
-!   integer l
-!   integer ll
-!   integer low
-!   integer m
-!   integer mm
-!   integer na
-!   integer nn
-!   logical notlas
-!   real(kind=8) p
-!   real(kind=8) q
-!   real(kind=8) r
-!   real(kind=8) ra
-!   real(kind=8) s
-!   real(kind=8) sa
-!   real(kind=8) t
-!   real(kind=8) temp
-!   real(kind=8) tst1
-!   real(kind=8) tst2
-!   real(kind=8) vi
-!   real(kind=8) vr
-!   real(kind=8) w
-!   real(kind=8) wi(n)
-!   real(kind=8) wr(n)
-!   real(kind=8) x
-!   real(kind=8) y
-!   real(kind=8) z(lda,n)
-!   real(kind=8) zz
-! !
-!   ierror = 0
-! !
-! !  Compute the norm of the upper Hessenberg matrix.
-! !
-!   hnorm = 0.0D+00
-!   do i = 1, n
-!     do j = max ( i-1, 1 ), n
-!       hnorm = hnorm + abs ( h(i,j) )
-!     end do
-!   end do
-! !
-! !  Store roots isolated by BALANC.
-! !
-!   do i = 1, n
-
-!     if ( i < low .or. i > igh ) then
-!       wr(i) = h(i,i)
-!       wi(i) = 0.0D+00
-!     end if
-
-!   end do
-
-!   en = igh
-!   t = 0.0D+00
-!   itn = 60 * n
-! !
-! !  Search for next eigenvalues
-! !
-!    60 continue
-
-!   if ( en < low ) then
-!     go to 340
-!   end if
-
-!   its = 0
-!   na = int(en-1)
-!   enm2 = na - 1
-! !
-! !  Look for single small sub-diagonal element.
-! !
-!    70 continue
-
-!   do ll = low, en
-
-!     l = en + low - ll
-!     if ( l == low ) then
-!       exit
-!     end if
-
-!     s = abs ( h(l-1,l-1) ) + abs ( h(l,l) )
-!     if ( s == 0.0D+00 ) then
-!       s = hnorm
-!     end if
-
-!     tst1 = s
-!     tst2 = tst1 + abs ( h(l,l-1) )
-!     if ( tst2 == tst1 ) then
-!       exit
-!     end if
-
-!   end do
-! !
-! !  Form shift.
-! !
-!   x = h(en,en)
-!   if ( l == en ) then
-!     go to 270
-!   end if
-
-!   y = h(na,na)
-!   w = h(en,na) * h(na,en)
-!   if ( l == na ) then
-!     go to 280
-!   end if
-
-!   if ( itn == 0 ) then
-!     ierror = en
-!     return
-!   end if
-! !
-! !  Form exceptional shift.
-! !
-!   if ( its == 10 .or. its == 20 ) then
-
-!     t = t + x
-
-!     do i = low, en
-!       h(i,i) = h(i,i) - x
-!     end do
-
-!     s = abs ( h(en,na) ) + abs ( h(na,enm2) )
-!     x = 0.75D+00 * s
-!     y = x
-!     w = -0.4375D+00 * s * s
-
-!   end if
-
-!   its = its + 1
-!   itn = itn - 1
-! !
-! !  Look for two consecutive small sub-diagonal elements.
-! !
-!   do mm = l, enm2
-
-!     m = enm2 + l - mm
-!     zz = h(m,m)
-!     r = x - zz
-!     s = y - zz
-!     p = (r * s - w) / h(m+1,m) + h(m,m+1)
-!     q = h(m+1,m+1) - zz - r - s
-!     r = h(m+2,m+1)
-!     s = abs ( p ) + abs ( q ) + abs ( r )
-!     p = p / s
-!     q = q / s
-!     r = r / s
-
-!     if ( m == l) then
-!       exit
-!     end if
-
-!     tst1 = abs ( p ) * ( abs ( h(m-1,m-1) ) + abs ( zz ) + abs ( h(m+1,m+1)))
-!     tst2 = tst1 + abs ( h(m,m-1) ) * ( abs ( q ) + abs ( r ) )
-!     if ( tst2 == tst1 ) then
-!       exit
-!     end if
-
-!   end do
-
-!   do i = m+2, en
-!     h(i,i-2) = 0.0D+00
-!     if ( i /= m+2 ) then
-!       h(i,i-3) = 0.0D+00
-!     end if
-!   end do
-! !
-! !  Double QR step involving rows L to EN and columns M to EN.
-! !
-!   do k = m, na
-
-!      notlas = k /= na
-
-!      if ( k /= m ) then
-!        p = h(k,k-1)
-!        q = h(k+1,k-1)
-!        r = 0.0D+00
-!        if ( notlas ) r = h(k+2,k-1)
-!        x = abs ( p ) + abs ( q ) + abs ( r )
-!        if ( x == 0.0D+00 ) then
-!          cycle
-!        end if
-!        p = p / x
-!        q = q / x
-!        r = r / x
-!      end if
-
-!      s = sign ( sqrt ( p*p + q*q + r*r ), p )
-
-!      if ( k /= m ) then
-!        h(k,k-1) = -s * x
-!      else
-!        if ( l /= m ) h(k,k-1) = -h(k,k-1)
-!      end if
-
-!      p = p + s
-!      x = p / s
-!      y = q / s
-!      zz = r / s
-!      q = q / p
-!      r = r / p
-
-!      if ( .not. notlas ) then
-! !
-! !  Row modification.
-! !
-!      do j = k, n
-!         p = h(k,j) + q * h(k+1,j)
-!         h(k,j) = h(k,j) - p * x
-!         h(k+1,j) = h(k+1,j) - p * y
-!      end do
-
-!      j = min ( en, k + 3 )
-! !
-! !  Column modification.
-! !
-!      do i = 1, j
-!         p = x * h(i,k) + y * h(i,k+1)
-!         h(i,k) = h(i,k) - p
-!         h(i,k+1) = h(i,k+1) - p * q
-!      end do
-! !
-! !  Accumulate transformations.
-! !
-!      do i = low, igh
-!        p = x * z(i,k) + y * z(i,k+1)
-!        z(i,k) = z(i,k) - p
-!        z(i,k+1) = z(i,k+1) - p * q
-!      end do
-
-!      else
-! !
-! !  Row modification.
-! !
-!      do j = k, n
-!         p = h(k,j) + q * h(k+1,j) + r * h(k+2,j)
-!         h(k,j) = h(k,j) - p * x
-!         h(k+1,j) = h(k+1,j) - p * y
-!         h(k+2,j) = h(k+2,j) - p * zz
-!      end do
-
-!      j=min(en,k+3)
-! !
-! !  Column modification.
-! !
-!      do i = 1, j
-!        p = x * h(i,k) + y * h(i,k+1) + zz * h(i,k+2)
-!        h(i,k) = h(i,k) - p
-!        h(i,k+1) = h(i,k+1) - p * q
-!        h(i,k+2) = h(i,k+2) - p * r
-!      end do
-! !
-! !  Accumulate transformations.
-! !
-!      do i = low, igh
-!         p = x * z(i,k) + y * z(i,k+1) + zz * z(i,k+2)
-!         z(i,k) = z(i,k) - p
-!         z(i,k+1) = z(i,k+1) - p * q
-!         z(i,k+2) = z(i,k+2) - p * r
-!      end do
-
-!     end if
-
-!   end do
-
-!   go to 70
-! !
-! !  One root found.
-! !
-!   270 continue
-
-!   h(en,en) = x + t
-!   wr(en) = h(en,en)
-!   wi(en) = 0.0D+00
-!   en = na
-!   go to 60
-! !
-! !  Two roots found.
-! !
-!   280 p = ( y - x ) / 2.0D+00
-!   q = p * p + w
-!   zz = sqrt ( abs ( q ) )
-!   h(en,en) = x + t
-!   x = h(en,en)
-!   h(na,na) = y + t
-
-!   if ( q < 0.0D+00 ) then
-!     go to 320
-!   end if
-! !
-! !  Real(Kind=8) pair.
-! !
-!   zz = p + sign(zz,p)
-!   wr(na) = x + zz
-!   wr(en)=wr(na)
-!   if ( zz /= 0.0D+00 ) wr(en) = x - w / zz
-!   wi(na) = 0.0D+00
-!   wi(en) = 0.0D+00
-!   x = h(en,na)
-!   s = abs ( x ) + abs ( zz )
-!   p = x / s
-!   q = zz / s
-!   r = sqrt(p*p+q*q)
-!   p = p / r
-!   q = q / r
-! !
-! !  Row modification.
-! !
-!   do j = na, n
-!      zz = h(na,j)
-!      h(na,j) = q * zz + p * h(en,j)
-!      h(en,j) = q * h(en,j) - p * zz
-!   end do
-! !
-! !  Column modification.
-! !
-!   do i = 1, en
-!      zz = h(i,na)
-!      h(i,na) = q * zz + p * h(i,en)
-!      h(i,en) = q * h(i,en) - p * zz
-!   end do
-! !
-! !  Accumulate transformations.
-! !
-!   do i = low, igh
-!      zz = z(i,na)
-!      z(i,na) = q * zz + p * z(i,en)
-!      z(i,en) = q * z(i,en) - p * zz
-!   end do
-
-!   go to 330
-! !
-! !  Complex pair.
-! !
-!   320 continue
-
-!   wr(na) = x + p
-!   wr(en) = x + p
-!   wi(na) = zz
-!   wi(en) = -zz
-
-!   330 continue
-!   en = enm2
-!   go to 60
-! !
-! !  All roots found.  Backsubstitute to find vectors of upper
-! !  triangular form.
-! !
-!   340 continue
-
-!   if ( hnorm == 0.0D+00 ) then
-!     return
-!   end if
-
-!   do nn = 1, n
-!      en = n + 1 - nn
-!      p=wr(en)
-!      q=wi(en)
-!      na = en - 1
-
-!      if ( q < 0.0D+00 ) then
-!        go to 710
-!      end if
-
-!      if ( q > 0.0D+00 ) then
-!        go to 800
-!      end if
-! !
-! !  Real(Kind=8) vector.
-! !
-!      m = en
-!      h(en,en) = 1.0D+00
-!      if ( na == 0 ) then
-!        go to 800
-!      end if
-
-!      do ii = 1, na
-!         i = en - ii
-!         w = h(i,i) - p
-!         r = 0.0D+00
-
-!         do j = m, en
-!           r = r + h(i,j) * h(j,en)
-!         end do
-
-!         if ( wi(i) < 0.0D+00 ) then
-!           zz = w
-!           s = r
-!           go to 700
-!         end if
-
-!         m = i
-
-!         if ( wi(i) == 0.0D+00 ) then
-
-!           t = w
-
-!           if ( t == 0.0D+00 ) then
-!             tst1 = hnorm
-!             t = tst1
-!   632       continue
-!             t = 0.01D+00 * t
-!             tst2 = hnorm + t
-!             if ( tst2 > tst1 ) then
-!               go to 632
-!             end if
-!           end if
-
-!           h(i,en) = -r / t
-!           go to 680
-
-!         end if
-! !
-! !  Solve real(kind=8) equations.
-! !
-!         x = h(i,i+1)
-!         y = h(i+1,i)
-!         q = (wr(i) - p) * (wr(i) - p) + wi(i) * wi(i)
-!         t = (x * s - zz * r) / q
-!         h(i,en) = t
-
-!         if ( abs ( x ) > abs ( zz ) ) then
-!           h(i+1,en) = (-r - w * t) / x
-!         else
-!           h(i+1,en) = (-s - y * t) / zz
-!         end if
-! !
-! !  Overflow control.
-! !
-!   680       continue
-
-!         t = abs ( h(i,en) )
-!         if ( t == 0.0D+00 ) then
-!           go to 700
-!         end if
-!         tst1 = t
-!         tst2 = tst1 + 1.0D+00 / tst1
-
-!         if ( tst2 <= tst1 ) then
-
-!           do j = i, en
-!             h(j,en)=h(j,en)/t
-!           end do
-
-!         end if
-
-!   700       continue
-!      end do
-! !
-! !  End real(kind=8) vector.
-! !
-!      go to 800
-! !
-! !  Complex vector.
-! !
-!   710    continue
-
-!     m = na
-! !
-! !  Last vector component chosen imaginary so that
-! !  eigenvector matrix is triangular.
-! !
-!      if ( abs ( h(en,na) ) > abs ( h(na,en) ) ) then
-!        h(na,na) = q / h(en,na)
-!        h(na,en) = -(h(en,en) - p) / h(en,na)
-!      else
-!        temp = 0.0D+00
-!        call cdiv(temp,-h(na,en),h(na,na)-p,q,h(na,na),h(na,en))
-!      end if
-
-!      h(en,na) = 0.0D+00
-!      h(en,en) = 1.0D+00
-!      enm2 = na - 1
-
-!      do ii = 1, enm2
-
-!         i = na - ii
-!         w = h(i,i) - p
-!         ra = 0.0D+00
-!         sa = 0.0D+00
-
-!         do j = m, en
-!            ra = ra + h(i,j) * h(j,na)
-!            sa = sa + h(i,j) * h(j,en)
-!         end do
-
-!         if ( wi(i) < 0.0D+00 ) then
-!           zz=w
-!           r = ra
-!           s = sa
-!           go to 795
-!         end if
-
-!         m = i
-
-!         if ( wi(i) == 0.0D+00 ) then
-!           call cdiv ( -ra, -sa, w, q, h(i,na), h(i,en) )
-!           go to 790
-!         end if
-! !
-! !  Solve complex equations.
-! !
-!         x = h(i,i+1)
-!         y = h(i+1,i)
-!         vr = (wr(i) - p) * (wr(i) - p) + wi(i) * wi(i) - q * q
-!         vi = (wr(i) - p) * 2.0D+00 * q
-
-!         if ( vr == 0.0D+00 .and. vi == 0.0D+00 ) then
-
-!           tst1 = hnorm * ( abs ( w ) + abs ( q ) + abs ( x ) + abs ( y ) &
-!             + abs ( zz ) )
-!           vr = tst1
-
-!   783     continue
-
-!           vr = 0.01D+00 * vr
-!           tst2 = tst1 + vr
-!           if ( tst2 > tst1) then
-!             go to 783
-!           end if
-
-!         end if
-
-!         call cdiv(x*r-zz*ra+q*sa,x*s-zz*sa-q*ra,vr,vi,h(i,na),h(i,en))
-
-!         if ( abs ( x ) > abs ( zz ) + abs ( q ) ) then
-!           h(i+1,na) = (-ra - w * h(i,na) + q * h(i,en)) / x
-!           h(i+1,en) = (-sa - w * h(i,en) - q * h(i,na)) / x
-!         else
-!           call cdiv ( -r-y*h(i,na), -s-y*h(i,en), zz, q, h(i+1,na), h(i+1,en) )
-!         end if
-! !
-! !  Overflow control
-! !
-! 790     continue
-
-!         t = max ( abs ( h(i,na) ), abs ( h(i,en) ) )
-
-!         if ( t /= 0.0D+00 ) then
-
-!           tst1 = t
-!           tst2 = tst1 + 1.0D+00 / tst1
-!           if ( tst2 <= tst1 ) then
-!             h(i:en,na) = h(i:en,na) / t
-!             h(i:en,en) = h(i:en,en) / t
-!           end if
-
-!         end if
-
-! 795     continue
-
-!      end do
-! !
-! !  End complex vector
-! !
-!   800    continue
-!   end do
-! !
-! !  End back substitution.
-! !
-! !  Vectors of isolated roots
-! !
-!   do i = 1, n
-
-!     if ( i < low .or. i > igh ) then
-!       z(i,i:n) = h(i,i:n)
-!     end if
-
-!   end do
-! !
-! !  Multiply by transformation matrix to give
-! !  vectors of original full matrix.
-! !
-!   do jj = low, n
-
-!     j = n + low - jj
-!     m = min ( j, igh )
-
-!     do i = low, igh
-
-!       zz = 0.0D+00
-!       do  k = low, m
-!         zz = zz + z(i,k) * h(k,j)
-!       end do
-
-!       z(i,j) = zz
-
-!     end do
-
-!   end do
-
-
-! end subroutine hqr2
-
-
-! subroutine cdiv ( ar, ai, br, bi, cr, ci )
-! !
-! !*******************************************************************************
-! !
-! !! CDIV carries out complex division.
-! !
-! !
-! !  Discussion:
-! !
-! !    CDIV computes:
-! !
-! !      (CR,CI) = (AR,AI) / (BR,BI)
-! !
-! !    using real(kind=8) arithmetic.
-! !
-! !  Modified:
-! !
-! !    15 March 2001
-! !
-! !  Parameters:
-! !
-! !    Input, real(kind=8) AR, AI, the real(kind=8) and imaginary parts of the
-! !    number to be divided.
-! !
-! !    Input, real(kind=8) BR, BI, the real(kind=8) and imaginary parts of the divisor.
-! !
-! !    Output, real(kind=8) CR, CI, the real(kind=8) and imaginary parts of the resultant.
-! !
-!   implicit none
-! !
-!   real(kind=8) ai
-!   real(kind=8) ais
-!   real(kind=8) ar
-!   real(kind=8) ars
-!   real(kind=8) bi
-!   real(kind=8) bis
-!   real(kind=8) br
-!   real(kind=8) brs
-!   real(kind=8) ci
-!   real(kind=8) cr
-!   real(kind=8) s
-! !
-!   s = abs ( br ) + abs ( bi )
-!   ars = ar / s
-!   ais = ai / s
-!   brs = br / s
-!   bis = bi / s
-!   s = brs**2 + bis**2
-!   cr = ( ars * brs + ais * bis ) / s
-!   ci = ( ais * brs - ars * bis ) / s
-
-
-! end subroutine cdiv
-
-
-! subroutine r_swap ( x, y )
-! !
-! !*******************************************************************************
-! !
-! !! R_SWAP switches two real(kind=8) values.
-! !
-! !
-! !  Modified:
-! !
-! !    30 November 1998
-! !
-! !  Author:
-! !
-! !    John Burkardt
-! !
-! !  Parameters:
-! !
-! !    Input/output, real(kind=8) X, Y.  On output, the values of X and
-! !    Y have been interchanged.
-! !
-!   implicit none
-! !
-!   real(kind=8) x
-!   real(kind=8) y
-!   real(kind=8) z
-! !
-!   z = x
-!   x = y
-!   y = z
-
- 
-! end subroutine r_swap
-
-! subroutine rmat_identity ( lda, n, a )
-! !
-! !*******************************************************************************
-! !
-! !! RMAT_IDENTITY sets the square matrix A to the identity.
-! !
-! !
-! !  Modified:
-! !
-! !    24 March 2000
-! !
-! !  Author:
-! !
-! !    John Burkardt
-! !
-! !  Parameters:
-! !
-! !    Input, integer LDA, the leading dimension of A.
-! !
-! !    Input, integer N, the order of A.
-! !
-! !    Output, real(kind=8) A(LDA,N), the matrix which has been
-! !    set to the identity.
-! !
-!   implicit none
-! !
-!   integer lda
-!   integer n
-! !
-!   real(kind=8) a(lda,n)
-!   integer i
-!   integer j
-! !
-!   do i = 1, n
-!     do j = 1, n
-!       if ( i == j ) then
-!         a(i,j) = 1.0D+00
-!       else
-!         a(i,j) = 0.0D+00
-!       end if
-!     end do
-!   end do
-
-
-! end subroutine rmat_identity
 
 !===========================================================================
 !That's all folks!
