@@ -1403,6 +1403,7 @@ end subroutine compacity
   real(kind=8),dimension(2)                :: wr, wi
   real(kind=8),dimension(2,2)              :: Moment
   real(kind=8),dimension(2,2)              :: localframe
+  integer, dimension(n_bodies)             :: mi_lista
   
   ! Inializing variables
   Moment(:,:) = 0.0
@@ -1414,6 +1415,17 @@ end subroutine compacity
                                   '      S1     ', '      S2     ', '     Q/P     ', &
                                   '   Theta_S   '
   end if
+
+  mi_lista(:) = 1
+  do i=1, n_contacts
+    if (TAB_CONTACTS(i)%nature == 'PLJCx') then
+      mi_lista(TAB_CONTACTS(i)%cd) = 0
+    end if
+
+    if (TAB_CONTACTS(i)%nature == 'DKJCx') then
+      mi_lista(TAB_CONTACTS(i)%cd) = 0
+    end if
+  end do
 
   ! Building the moment tensor from the contacts
   do i=1, n_contacts
@@ -1430,6 +1442,8 @@ end subroutine compacity
     
     ! Only active contacts
     if (abs(Rnik) .le. 1.D-8) cycle
+
+    if (mi_lista(cd) == 0 .or. mi_lista(an)==0) cycle
     
     ! Building the branch vector 
     Lik = TAB_BODIES(cd)%center-TAB_BODIES(an)%center
