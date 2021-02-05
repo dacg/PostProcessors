@@ -54,7 +54,7 @@ integer                                     ::  n_disk=0, n_polyg=0, n_cluster=0
 integer                                     ::  init_frame, last_frame 
 integer                                     ::  n_dkdk=0, n_plpl=0, n_dkjc=0, n_pljc=0, n_dkpl=0, n_ptpt=0
 integer                                     ::  n_simple=0,n_double=0, n_contacts=0, n_contacts_raw=0
-integer                                     ::  except, ii, step
+integer                                     ::  except, ii
 real(kind=8)                                ::  time
 
 ! Box size
@@ -769,9 +769,7 @@ subroutine update_bodies(i_)
       TAB_BODIES(i)%center=TAB_BODIES(i)%center_ref+c_center
       TAB_BODIES(i)%rot=rot
 
-      TAB_BODIES(i)%veloc(1) = veloc(1)
-      TAB_BODIES(i)%veloc(2) = veloc(2)
-      TAB_BODIES(i)%veloc(3) = veloc(3)
+      TAB_BODIES(i)%veloc = veloc
       
       ! Applying the relative rotation if this is a polyg or a cluster
       if (TAB_BODIES(i)%shape == 'polyx') then
@@ -957,11 +955,11 @@ subroutine read_contacts(i_)
       read(2,'(29X, 2(5x,D14.7,2X))') coor_ctc(1), coor_ctc(2)
 
       TAB_CONTACTS_RAW(i)%id = id
-      TAB_CONTACTS_RAW(i)%cd=cd
-      TAB_CONTACTS_RAW(i)%an=an
-      TAB_CONTACTS_RAW(i)%n_frame=n_frame
-      TAB_CONTACTS_RAW(i)%t_frame(1)=n_frame(2)
-      TAB_CONTACTS_RAW(i)%t_frame(2)=-n_frame(1)
+      TAB_CONTACTS_RAW(i)%cd = cd
+      TAB_CONTACTS_RAW(i)%an = an
+      TAB_CONTACTS_RAW(i)%n_frame = n_frame
+      TAB_CONTACTS_RAW(i)%t_frame(1) = n_frame(2)
+      TAB_CONTACTS_RAW(i)%t_frame(2) = -n_frame(1)
       TAB_CONTACTS_RAW(i)%coor_ctc=coor_ctc
       TAB_CONTACTS_RAW(i)%rn=rn
       TAB_CONTACTS_RAW(i)%rt=rt
@@ -1032,8 +1030,8 @@ subroutine read_contacts(i_)
 
         ! Counting the number of active contacts per body
         if (abs(TAB_CONTACTS(j)%rn) .gt. 1D-8) then
-          TAB_BODIES(cd)%n_ctc = TAB_BODIES(cd)%n_ctc + 1
-          TAB_BODIES(an)%n_ctc = TAB_BODIES(an)%n_ctc + 1
+          TAB_BODIES(TAB_CONTACTS(j)%cd)%n_ctc = TAB_BODIES(TAB_CONTACTS(j)%cd)%n_ctc + 1
+          TAB_BODIES(TAB_CONTACTS(j)%an)%n_ctc = TAB_BODIES(TAB_CONTACTS(j)%an)%n_ctc + 1
         end if
       end if
       if (TAB_CONTACTS_RAW(i)%n_interact==2) then
@@ -1060,8 +1058,8 @@ subroutine read_contacts(i_)
 
           ! Counting the number of active contacts per body
           if (abs(TAB_CONTACTS(j)%rn) .gt. 1D-8) then
-            TAB_BODIES(cd)%n_ctc = TAB_BODIES(cd)%n_ctc + 1
-            TAB_BODIES(an)%n_ctc = TAB_BODIES(an)%n_ctc + 1
+            TAB_BODIES(TAB_CONTACTS(j)%cd)%n_ctc = TAB_BODIES(TAB_CONTACTS(j)%cd)%n_ctc + 1
+            TAB_BODIES(TAB_CONTACTS(j)%an)%n_ctc = TAB_BODIES(TAB_CONTACTS(j)%an)%n_ctc + 1
           end if
         end if
       end if
@@ -1370,7 +1368,11 @@ subroutine compacity(i_, init_, last_)
   end do
   
   ! Computing the total volume of the box
-  v_total = box_width * box_height
+  if (flag_periodic == 1) then
+    v_total = l_periodic*box_height
+  else
+    v_total = box_width * box_height
+  end if 
   
   ! Writing
   write(103,'(6(1X,E12.5))') time, box_height, box_width, v_solid/v_total
@@ -1434,11 +1436,12 @@ end subroutine compacity
 
     if (flag_periodic==1) then
       ! Correcting the branch orientation and length if necessary
-      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
-        ! This is a peridic case
-        if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
-          Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
-        end if
+      !if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 0.5*(l_periodic)) then
+        ! This is a periodic case
+        !if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+        Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
+        !end if
         ! Y component
         !if (Lik(2) .gt. (max_d_vert_an + max_d_vert_cd)) then
         !Lik(2) = Lik(2) - y_period*(Lik(2)/abs(Lik(2)))
@@ -1454,7 +1457,11 @@ end subroutine compacity
   end do
   
   ! Changing to stresses
-  Moment = Moment / (box_height*box_width)
+  if (flag_periodic == 1) then
+    Moment = Moment / (box_height*l_periodic)
+  else
+    Moment = Moment / (box_height*box_width)
+  end if
 
   ! Writing the stress tensor
   write(104,'(4(1X,E12.5))', advance='no') time, Moment(1,1), Moment(1,2), Moment(2,2)
@@ -1509,14 +1516,13 @@ subroutine coordination(i_, init_, last_)
   end if
   
   ! Computing the number of particles in the box other than rattlers
-  np = 0
   do i=1, n_bodies
     if (TAB_BODIES(i)%shape == 'wallx' .or. TAB_BODIES(i)%shape == 'pt2dx') cycle
     if (TAB_BODIES(i)%n_ctc .lt. 2) cycle
     np = np + 1
   end do
   
-  ! Computing the effectif number of contacts
+  ! Computing the effective number of contacts
   do i=1, n_contacts
     ! Only between particles
     if (TAB_CONTACTS(i)%nature == 'PLJCx') cycle 
@@ -1524,10 +1530,9 @@ subroutine coordination(i_, init_, last_)
     if (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
 
     ! Computing the number of contacts if they are active
-    if (abs(TAB_CONTACTS(i)%rn) .lt. 1e-8 .and. abs(TAB_CONTACTS(i)%rt) .lt. 1e-8) cycle 
+    if (abs(TAB_CONTACTS(i)%rn) .lt. 1e-8) cycle 
 
     zc = zc + 1
-
   end do
   
   ! The coordination number
@@ -1541,7 +1546,7 @@ subroutine coordination(i_, init_, last_)
   end if
   
   ! General info
-  print*, 'Write Coordination              ---> Ok!'
+  print*, 'Write Coordination            ---> Ok!'
   
 end subroutine coordination
 
