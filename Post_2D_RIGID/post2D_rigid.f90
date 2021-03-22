@@ -60,6 +60,8 @@ real(kind=8)                                ::  time
 ! Box size
 !================================================
 real(kind=8)                               ::  box_height, box_width
+real(kind=8)                               ::  box_height_0, box_width_0
+
 
 ! Functions list
 !================================================
@@ -70,7 +72,8 @@ integer                                    ::  c_coordination=0, c_compacity=0, 
                                                c_nctc_probability=0, c_frc_list=0, option_cohe=0, c_fail_mode=0,  &
                                                c_list_interact=0, c_sign_aniso=0, c_clean_tresca=0, c_multi_part_frac=0, &
                                                c_avg_shape_ratio=0, c_sign_aniso_l=0, c_list_interact_l = 0, c_ctc_dir_l=0, & 
-                                               c_brc_dir_l=0, c_frc_dir_l=0, c_draw_vtk = 0
+                                               c_brc_dir_l=0, c_frc_dir_l=0, c_draw = 0, c_rod_strain=0, c_kin_energy=0, &
+                                               c_second_work=0
 
 ! Flag list
 !================================================
@@ -80,6 +83,7 @@ real(kind=8)                              ::  l_periodic=0
 !Variables DavidC.
 integer, dimension(:), allocatable         ::  t_failure
 integer, dimension(:,:), allocatable       ::  cohe_couples
+real(kind=8), dimension(2)                 ::  l_prev, sigma_prev
 real(kind=8), dimension(:,:), allocatable  ::  l_forces_c
 
 ! Global parameters
@@ -93,7 +97,7 @@ print*,'-------------------------------------------'
 print*,'!                                         !'
 print*,'!            Post-processing 2D           !'
 print*,'!         from Emilien Azema Code         !'
-print*,'!           David C + _______             !'
+print*,'!                 David C                 !'
 print*,'-------------------------------------------'
 print*,'Flags to be computed: '
 ! Opening the file
@@ -121,6 +125,7 @@ do
       read(command,*) init_frame
       ! Reading the next integer
       read(1,*) last_frame 
+      print*, 'Frames to be analyzed: ', init_frame, ' to ' , last_frame
     end if 
     cycle
   end if
@@ -190,6 +195,30 @@ do
     ! Uses port 109
     cycle
   end if
+
+  if (command=='ROD STRAIN                   :') then
+    c_rod_strain=1
+    ! Uses port 201
+    cycle
+  end if
+
+  if (command=='KINETIC ENERGY               :') then
+    c_kin_energy=1
+    ! Uses port 202
+    cycle
+  end if
+
+  if (command=='SECOND ORDER WORK            :') then
+    c_second_work=1
+    ! Uses port 203
+    cycle
+  end if
+
+  if (command=='DRAW                         :') then
+    c_draw = 1
+    ! Uses port 300
+    cycle
+  end if
   
   ! if (command=='MULTIPART FRAG               :') then
   !   c_multi_part_frac = 1
@@ -256,12 +285,6 @@ do
   !   c_sign_aniso = 1
   !   ! Uses port 117
   !   open (unit=117,file='./POSTPRO/SGN_ANISO.DAT',status='replace')
-  !   cycle
-  ! end if
-
-  ! if (command=='DRAW                         :') then
-  !   c_draw = 1
-  !   ! Uses port 121
   !   cycle
   ! end if
 
@@ -334,7 +357,7 @@ do ii=init_frame, last_frame
   call update_bodies(ii)
 
   ! Computing the size of the box
-  call box_size
+  call box_size(ii,init_frame,last_frame)
 
   ! Reading the contact information
   call read_contacts(ii)
@@ -348,6 +371,11 @@ do ii=init_frame, last_frame
   if (c_ctc_anisotropy         == 1)  call ctc_anisotropy(ii,init_frame,last_frame)
   if (c_brc_anisotropy         == 1)  call brc_anisotropy(ii,init_frame,last_frame)
   if (c_frc_anisotropy         == 1)  call frc_anisotropy(ii,init_frame,last_frame)
+  if (c_draw                   == 1)  call draw(ii,init_frame,last_frame)
+
+  if (c_rod_strain             == 1)  call rod_strain(ii,init_frame,last_frame)
+  if (c_kin_energy             == 1)  call kin_energy(ii,init_frame,last_frame)
+  if (c_second_work            == 1)  call second_work(ii,init_frame,last_frame)
 
 !     if (calcul_coordination         == 1)  call nb_coordination
 !     if (calcul_granulo              == 1)  call granulometry
@@ -429,13 +457,14 @@ end subroutine number_files
 !==============================================================================
 ! Computing the size of the box
 !==============================================================================
-subroutine box_size
-
-  implicit none
+subroutine box_size(i_, init_, last_)
   
-  integer                            ::  i, j
-  real(kind=8)                       ::  x_max,y_max
-  real(kind=8)                       ::  x_min,y_min
+  implicit none
+
+  integer, intent(in)                      :: i_, init_, last_  
+  integer                                  ::  i, j
+  real(kind=8)                             ::  x_max,y_max
+  real(kind=8)                             ::  x_min,y_min
  
   x_min =  9999.
   x_max = -9999.
@@ -488,6 +517,12 @@ subroutine box_size
 
   box_width  = x_max - x_min
   box_height = y_max - y_min
+
+  ! Storing the initial values
+  if (i_ == init_) then
+    box_height_0 = box_height
+    box_width_0 = box_width
+  end if
 
 end subroutine box_size
 
@@ -1386,7 +1421,6 @@ subroutine compacity(i_, init_, last_)
   
 end subroutine compacity
 
-
 !==============================================================================
 ! Computing the stress tensor and Q over P
 !==============================================================================
@@ -1403,7 +1437,7 @@ end subroutine compacity
   real(kind=8),dimension(2)                :: wr, wi
   real(kind=8),dimension(2,2)              :: Moment
   real(kind=8),dimension(2,2)              :: localframe
-  integer, dimension(n_bodies)             :: mi_lista
+  !integer, dimension(n_bodies)             :: mi_lista
   
   ! Inializing variables
   Moment(:,:) = 0.0
@@ -1416,16 +1450,16 @@ end subroutine compacity
                                   '   Theta_S   '
   end if
 
-  mi_lista(:) = 1
-  do i=1, n_contacts
-    if (TAB_CONTACTS(i)%nature == 'PLJCx') then
-      mi_lista(TAB_CONTACTS(i)%cd) = 0
-    end if
-
-    if (TAB_CONTACTS(i)%nature == 'DKJCx') then
-      mi_lista(TAB_CONTACTS(i)%cd) = 0
-    end if
-  end do
+!  mi_lista(:) = 1
+!  do i=1, n_contacts
+!    if (TAB_CONTACTS(i)%nature == 'PLJCx') then
+!      mi_lista(TAB_CONTACTS(i)%cd) = 0
+!    end if
+!    
+!    if (TAB_CONTACTS(i)%nature == 'DKJCx') then
+!      mi_lista(TAB_CONTACTS(i)%cd) = 0
+!    end if
+!  end do
 
   ! Building the moment tensor from the contacts
   do i=1, n_contacts
@@ -1443,7 +1477,7 @@ end subroutine compacity
     ! Only active contacts
     if (abs(Rnik) .le. 1.D-8) cycle
 
-    if (mi_lista(cd) == 0 .or. mi_lista(an)==0) cycle
+    !if (mi_lista(cd) == 0 .or. mi_lista(an)==0) cycle
     
     ! Building the branch vector 
     Lik = TAB_BODIES(cd)%center-TAB_BODIES(an)%center
@@ -1845,1005 +1879,1149 @@ subroutine frc_anisotropy(i_, init_, last_)
 
 end subroutine frc_anisotropy
 
-
 !==============================================================================
 ! Grain size distribution
 !==============================================================================
-  subroutine granulo
-    
-    implicit none
-    
-    integer                                  :: i, j, bins, sumaInt, c_bin
-    real(kind=8)                             :: rmin, rmax, interval, porcentNum
-    real(kind=8)                             :: areaTotal, porcentArea, area
-    integer, allocatable, dimension(:)       :: freq_tab
-    real(kind=8), dimension(20000)           :: tams
-    
-    ! Opening file
-    open(unit=109,file='./POSTPRO/GRANULO',status='replace')
-    
-    rmin =  9999.
-    rmax = -9999.
-    
-    ! Finding the maximun and minimun radius
-    do i=1, n_bodies
-      ! Only particles
-      if(TAB_BODIES(i)%shape == 'wallx') cycle
-      if(TAB_BODIES(i)%shape == 'pt2dx') cycle
+subroutine granulo
+  
+  implicit none
+  
+  integer                                  :: i, j, bins, sumaInt, c_bin
+  real(kind=8)                             :: rmin, rmax, interval, porcentNum
+  real(kind=8)                             :: areaTotal, porcentArea, area
+  integer, allocatable, dimension(:)       :: freq_tab
+  real(kind=8), dimension(20000)           :: tams
+  
+  ! Opening file
+  open(unit=109,file='./POSTPRO/GRANULO',status='replace')
+  
+  rmin =  9999.
+  rmax = -9999.
+  
+  ! Finding the maximun and minimun radius
+  do i=1, n_bodies
+    ! Only particles
+    if(TAB_BODIES(i)%shape == 'wallx') cycle
+    if(TAB_BODIES(i)%shape == 'pt2dx') cycle
 
-      if (TAB_BODIES(i)%radius<rmin) then
-        rmin = TAB_BODIES(i)%radius
+    if (TAB_BODIES(i)%radius<rmin) then
+      rmin = TAB_BODIES(i)%radius
+    end if 
+    if (TAB_BODIES(i)%radius>rmax) then
+      rmax = TAB_BODIES(i)%radius
+    end if
+  end do
+  
+  bins = 32  !here is specified the number of intervals for the distribution
+
+  ! Allocating frequencies table
+  if (allocated(freq_tab)) deallocate(freq_tab)
+  allocate(freq_tab(bins))
+  
+  interval = (rmax - rmin)/bins
+  
+  do i=1, n_bodies
+    !c_bin = XXXX (TAB_BODIES(i)%radius - rmin)/interval XXXXXXX
+    freq_tab(c_bin) = freq_tab(c_bin) + 1
+  end do    
+  
+  sumaInt = 0
+  porcentNum = 0
+  porcentArea = 0
+  area = 0
+  areaTotal = 0 
+  
+  do i=1, n_bodies
+    areaTotal = areaTotal + TAB_BODIES(i)%area
+  enddo
+  
+  !do j = 1, until  
+  !  area = area + (tams(j)**2)*pi*cant(j)
+  !  porcentArea = (area/areaTotal)*100
+  !  
+  !  write(109,'(4(1X,E12.5))') tams(j), porcentArea
+  !enddo
+  
+  close(109)
+  
+  ! General info
+  print*, 'Write Grain size dist     ---> Ok!'
+  
+end subroutine granulo
+
+
+!==============================================================================
+! Computing rod's srains
+!==============================================================================
+subroutine rod_strain(i_, init_, last_)
+
+  implicit none
+
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i, cd_c, an_c, j
+  real(kind=8)                             :: dx, dy
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=201,file='./POSTPRO/ROD_STRAIN.DAT',status='replace')
+    write(201,*) '#   time     ','     cd     ', '     an     ', '    dx    ', '    dy    '
+  end if
+  
+  ! The number of PTPT found
+  j = 0
+
+  write(201,'(1X,E12.5)', advance='no') time
+
+  do i=1,n_contacts_raw
+    if (TAB_CONTACTS_RAW(i)%nature == 'PTPT2') then
+      j=j+1
+      cd_c = TAB_CONTACTS_RAW(i)%cd
+      an_c = TAB_CONTACTS_RAW(i)%an
+      dx = TAB_BODIES(cd_c)%center(1) -  TAB_BODIES(an_c)%center(1)
+      dy = TAB_BODIES(cd_c)%center(2) -  TAB_BODIES(an_c)%center(2)
+
+      if (j < n_ptpt) then
+        write(201,'(1X,I11,1X,I11,1X,E12.5,1X,E12.5)', advance='no') cd_c, an_c, dx, dy
+      else 
+        write(201,'(1X,I11,1X,I11,1X,E12.5,1X,E12.5)') cd_c, an_c, dx, dy
       end if 
-      if (TAB_BODIES(i)%radius>rmax) then
-        rmax = TAB_BODIES(i)%radius
+    end if 
+  end do
+  
+  if (i_ == last_) then
+    close(201)
+  end if
+
+  ! General info
+  print*, 'Write rod strain              ---> Ok!'
+  
+end subroutine rod_strain
+
+!==============================================================================
+! Computing granular kinetic energy
+!==============================================================================
+subroutine kin_energy(i_, init_, last_)
+
+  implicit none
+
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i
+  real(kind=8)                             :: e_kin_l, e_kin_w, v_norm
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=202,file='./POSTPRO/KIN_ENERGY.DAT',status='replace')
+    write(202,*) '#   time     ','    Ek/rho    ','    Ew/rho    '
+  end if
+
+  ! Initializing the kinetic energy
+  e_kin_l = 0.
+  e_kin_w = 0.
+
+  ! Adding energy
+  do i=1,n_bodies
+    if (TAB_BODIES(i)%shape == 'wallx' .or. TAB_BODIES(i)%shape == 'pt2dx') cycle
+    
+    ! The norm of the velocity
+    v_norm = (TAB_BODIES(i)%veloc(1)**2 + TAB_BODIES(i)%veloc(2)**2)**0.5
+    e_kin_l = e_kin_l + (0.5*TAB_BODIES(i)%area*v_norm**2)
+    e_kin_w = e_kin_w + (0.5*TAB_BODIES(i)%area*TAB_BODIES(i)%veloc(3)**2)
+  end do
+
+  write(202,'(3(1X,E12.5))') time, e_kin_l, e_kin_w
+  
+  if (i_ == last_) then
+    close(202)
+  end if
+
+  ! General info
+  print*, 'Write kinetic energy          ---> Ok!'
+  
+end subroutine kin_energy
+
+!==============================================================================
+! Computing the second order work
+!==============================================================================
+subroutine second_work(i_, init_, last_)
+
+  implicit none
+
+  integer, intent(in)                       :: i_, init_, last_
+  integer                                   :: i, j
+  real(kind=8)                              :: sec_work
+  real(kind=8), dimension(2)                :: f_vec, sigma_curr, d_sigma, l_curr, d_u
+  real(kind=8), dimension(:,:), allocatable :: array_wall
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=203,file='./POSTPRO/2ND_WORK.DAT',status='replace')
+    write(203,*) '#   time     ','    d2W     '
+  end if
+
+  ! We need to know the forces on the walls to estimate stresses
+  if (allocated(array_wall)) deallocate(array_wall)
+  allocate(array_wall(n_wall,2))
+
+  ! Initializing
+  array_wall(:,:) = 0.0
+
+  ! We look for interactions with walls
+  do i=1, n_contacts
+    if (TAB_CONTACTS(i)%nature == 'DKJCx' .or. TAB_CONTACTS(i)%nature == 'PLJCx') then
+      ! Setting the correct id matching the number of wall
+      j = TAB_CONTACTS(i)%an - (n_bodies - n_wall - n_pt2d)
+
+      ! The force vector
+      f_vec = TAB_CONTACTS(i)%rn*TAB_CONTACTS(i)%n_frame + TAB_CONTACTS(i)%rt*TAB_CONTACTS(i)%t_frame
+
+      array_wall(j,1) = array_wall(j,1) + f_vec(1)
+      array_wall(j,2) = array_wall(j,2) + f_vec(2)
+    end if 
+  end do
+
+  if (i_ == init_) then
+    ! Finding the average stresses. This suposes my starndad wall organization
+    sigma_prev(1) = (array_wall(1,2)+array_wall(2,2))/(2*box_width)
+    sigma_prev(2) = (array_wall(3,2)+array_wall(4,2))/(2*box_height)
+
+    ! The initial state does not move
+    l_prev(1) = box_height
+    l_prev(2) = box_width
+
+  else 
+    sigma_curr(1) = (array_wall(1,2)+array_wall(2,2))/(2*box_width)
+    sigma_curr(2) = (array_wall(3,2)+array_wall(4,2))/(2*box_height)
+
+    d_sigma(1) = sigma_curr(1) - sigma_prev(1)
+    d_sigma(2) = sigma_curr(2) - sigma_prev(2)
+
+    l_curr(1) = box_height
+    l_curr(2) = box_width
+
+    d_u(1) = (l_curr(1) - l_prev(1))/box_height_0!(l_prev(1))
+    d_u(2) = (l_curr(2) - l_prev(2))/box_width_0!(l_prev(2))
+
+    sec_work = (d_sigma(1)*d_u(1)+d_sigma(2)*d_u(2))/((d_sigma(1)**2 + d_sigma(2)**2)**0.5 * (d_u(1)**2 + d_u(2)**2)**0.5)
+
+    ! We print
+    write(203,'(6(1X,E12.5))') time, d_sigma(1), d_sigma(2), d_u(1), d_u(2), sec_work
+
+    ! And update
+    sigma_prev = sigma_curr
+    l_prev = l_curr
+  end if
+
+  if (i_ == last_) then
+    close(203)
+  end if
+
+  ! General info
+  print*, 'Write second order work       ---> Ok!'
+  
+end subroutine second_work
+
+
+!================================================
+! Drawing in vtk
+!================================================
+subroutine draw(i_, init_, last_)
+
+  implicit none
+
+  integer, intent(in)                       :: i_, init_, last_
+  
+  character(:), allocatable                      ::  vtk_part, vtk_inter, vtk_counter
+  character(:), allocatable                      ::  vtk_n_points
+  logical                                        ::  dir_vtk
+  character(len=6)                               ::  vtk_c_temp,  v_n_vertices
+  integer                                        ::  i, j, k
+  integer                                        ::  n_l_vertices, curr_l_faces
+  integer                                        ::  n_l_fields, l_counter
+  real(kind=8), dimension(3)                     ::  curr_l_vector
+  integer                                        ::  l_cdt, l_ant
+  
+  ! Variables for the forces
+  character(:), allocatable                      ::  vtk_forces
+  character(:), allocatable                      ::  vtk_n_v_forces
+  character(len=6)                               ::  v_n_v_forces
+  real(kind=8)                                   ::  vtk_ave_force, l_force_scale, l_force
+  real(kind=8)                                   ::  l_rn, l_rt, l_rs
+  real(kind=8), dimension(3)                     ::  vtk_cd_center, vtk_an_center, v_l_normal, v_l_t
+  integer                                        ::  f_counter
+  
+  ! Variables for the contact network
+  character(:), allocatable                      ::  vtk_ctc_net
+  character(:), allocatable                      ::  vtk_n_v_ctcnet
+  integer                                        ::  ctc_counter
+  character(len=6)                               ::  v_n_v_ctcnet
+  real(kind=8)                                   ::  vtk_ave_rad, l_ctc_scale
+  
+  
+  ! Cleaning or creating the folder if necessary
+  if (i_ == init_) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/VTK', exist=dir_vtk)
+    if(dir_vtk) then
+      ! Cleaning
+      call system('rm ./POSTPRO/VTK/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/VTK')
+    end if
+  end if
+  
+  ! Creating the file name for the particles
+  write(vtk_c_temp, '(I6)') i_
+  
+  if (i_<10) then
+    vtk_counter = vtk_c_temp(6:6)
+  else if (i_ >= 10 .and. i_ < 100) then
+    vtk_counter = vtk_c_temp(5:6)
+  else if (i_ >= 100 .and. i_<1000) then
+    vtk_counter = vtk_c_temp(4:6)
+  else
+    print*, 'Cannot draw more than 1000 files'
+    stop
+  end if
+  
+  vtk_part = './POSTPRO/VTK/rigid_' // vtk_counter // '.vtk'
+  
+  open(unit=300, file=vtk_part, status='replace')
+  write(300,'(A)') '# vtk DataFile Version 3.0'
+  write(300,'(A,I6)') 'RIGID ', i_
+  write(300,'(A)') 'ASCII'
+  write(300,'(A)') 'DATASET POLYDATA'
+  
+  ! Writing the number of vertices
+  n_l_vertices = 0
+  do i=1, n_bodies-n_wall
+    n_l_vertices = n_l_vertices + TAB_BODIES(i)%n_vertex 
+  end do
+  
+  ! Adding the vertices of the walls
+  n_l_vertices = n_l_vertices + n_wall*4
+  
+  write(v_n_vertices, '(I6)') n_l_vertices
+  
+  vtk_n_points = 'POINTS ' // v_n_vertices // ' float'
+  write(300,'(A)') vtk_n_points
+  
+  ! Writing the coordinates of the vertices of particles and walls
+  ! 3 vertices per row
+  ! 
+  k=0
+  do i=1, n_bodies
+    !write(300,*) 'Particle', i
+    if (i .le. n_bodies) then
+      do j=1, TAB_BODIES(i)%n_vertex
+        k = k + 1
+        if(k .lt. 3) then 
+          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          else
+            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          end if
+          
+          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          else 
+            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+          !  write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
+        else
+          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          else 
+            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          end if
+          
+          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          else
+            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+            write(300,'(F11.8,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+          !  write(300,'(F9.7,A)') TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
+          k = 0
+        end if
+      end do
+    else
+      ! Writing the vertices of the walls
+      do j=1, 4 ! each wall has 4 vertices
+        k = k +1
+        if(k .lt. 3) then 
+          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          else
+            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          end if
+          
+          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          else 
+            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(3,j) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') 0. ! º1TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+          !  write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,3), ' '
+          ! end if
+        else
+          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          else 
+            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          end if
+          
+          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          else 
+            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+            write(300,'(F11.8,A)') 0.0 !TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+          !  write(300,'(F9.7,A)') TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
+          
+          k = 0
+          
+        end if
+      end do
+    end if
+  end do
+  
+  write(300, '(A)') ' '
+  
+  ! Writing the conectivity between vertices
+  ! Plus 4 walls
+  write(300,'(A)', advance='no') 'POLYGONS '
+  write(300, '(2(I6,A))') n_bodies, ' ' , (n_l_vertices + n_bodies)
+  
+  curr_l_faces = 0
+  
+  do i=1, n_bodies-n_wall
+    !write(300,*) 'Particle', i
+    ! Write the number of vertices
+    write(300, '(I2,A)', advance= 'no') TAB_BODIES(i)%n_vertex, ' '
+    
+    ! Write its consecutive conectivity
+    do j=1, TAB_BODIES(i)%n_vertex
+      
+      ! ... writing precisely 
+      if (j .lt. TAB_BODIES(i)%n_vertex) then
+        if (curr_l_faces - 1 + j .lt. 10) then
+          write(300, '(I1)', advance = 'no') curr_l_faces - 1 + j
+        else if (curr_l_faces - 1 + j .lt. 100) then
+          write(300, '(I2)', advance = 'no') curr_l_faces - 1 + j
+        else if (curr_l_faces - 1 + j .lt. 1000) then
+          write(300, '(I3)', advance = 'no') curr_l_faces - 1 + j
+        else if (curr_l_faces - 1 + j .lt. 10000) then
+          write(300, '(I4)', advance = 'no') curr_l_faces - 1 + j
+        else if (curr_l_faces - 1 + j .lt. 100000) then
+          write(300, '(I5)', advance = 'no') curr_l_faces - 1 + j
+        end if
+        
+        write(300, '(A)', advance='no') ' '
+        
+      else
+        if (curr_l_faces - 1 + j .lt. 10) then
+          write(300, '(I1)') curr_l_faces - 1 + j
+        else if (curr_l_faces - 1 + j .lt. 100) then
+          write(300, '(I2)') curr_l_faces - 1 + j
+        else if (curr_l_faces - 1 + j .lt. 1000) then
+          write(300, '(I3)') curr_l_faces - 1 + j
+        else if (curr_l_faces - 1 + j .lt. 10000) then
+          write(300, '(I4)') curr_l_faces - 1 + j
+        else if (curr_l_faces - 1 + j .lt. 100000) then
+          write(300, '(I5)') curr_l_faces - 1 + j
+        end if
       end if
+      
     end do
+    curr_l_faces = curr_l_faces + TAB_BODIES(i)%n_vertex
+  end do
+  
+  ! Writing the conectivity for the walls
+  ! For all the walls 
+  do i=1, n_wall
     
-    bins = 32  !here is specified the number of intervals for the distribution
-
-    ! Allocating frequencies table
-    if (allocated(freq_tab)) deallocate(freq_tab)
-    allocate(freq_tab(bins))
+    !!!!! 1st (1-2-3-4)
+    write(300, '(I1,A)', advance= 'no') 4, ' '
     
-    interval = (rmax - rmin)/bins
+    if (curr_l_faces .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces
+    end if
     
-    do i=1, n_bodies
-      !c_bin = XXXX (TAB_BODIES(i)%radius - rmin)/interval XXXXXXX
-      freq_tab(c_bin) = freq_tab(c_bin) + 1
-    end do    
+    write(300, '(A)', advance='no') ' '
     
-    sumaInt = 0
-    porcentNum = 0
-    porcentArea = 0
-    area = 0
-    areaTotal = 0 
+    if (curr_l_faces +1 .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces +1
+    else if (curr_l_faces +1 .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces +1 
+    end if
     
-    do i=1, n_bodies
-      areaTotal = areaTotal + TAB_BODIES(i)%area
-    enddo
+    write(300, '(A)', advance='no') ' '
     
-    !do j = 1, until  
-    !  area = area + (tams(j)**2)*pi*cant(j)
-    !  porcentArea = (area/areaTotal)*100
-    !  
-    !  write(109,'(4(1X,E12.5))') tams(j), porcentArea
-    !enddo
+    if (curr_l_faces +2 .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces +2
+    else if (curr_l_faces +2 .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces +2 
+    end if
     
-    close(109)
+    write(300, '(A)', advance='no') ' '
     
-    ! General info
-    print*, 'Write Grain size dist     ---> Ok!'
+    if (curr_l_faces +3 .lt. 10) then
+      write(300, '(I1)') curr_l_faces +3
+    else if (curr_l_faces +3 .lt. 100) then
+      write(300, '(I2)') curr_l_faces +3 
+    else if (curr_l_faces +3 .lt. 1000) then
+      write(300, '(I3)') curr_l_faces +3 
+    else if (curr_l_faces +3 .lt. 10000) then
+      write(300, '(I4)') curr_l_faces +3
+    else if (curr_l_faces +3 .lt. 100000) then
+      write(300, '(I5)') curr_l_faces +3
+    end if
     
-  end subroutine granulo
-
-
-! !================================================
-! ! Drawing in vtk
-! !================================================
-! subroutine draw
-  
-!   implicit none
-  
-!   character(:), allocatable                      ::  vtk_part, vtk_inter, vtk_counter
-!   character(:), allocatable                      ::  vtk_n_points
-!   logical                                        ::  dir_vtk
-!   character(len=6)                               ::  vtk_c_temp,  v_n_vertices
-!   integer                                        ::  i, j, k
-!   integer                                        ::  n_l_vertices, curr_l_faces
-!   integer                                        ::  n_l_fields, l_counter
-!   real(kind=8), dimension(3)                     ::  curr_l_vector
-!   integer                                        ::  l_cdt, l_ant
-  
-!   ! Variables for the forces
-!   character(:), allocatable                      ::  vtk_forces
-!   character(:), allocatable                      ::  vtk_n_v_forces
-!   character(len=6)                               ::  v_n_v_forces
-!   real(kind=8)                                   ::  vtk_ave_force, l_force_scale, l_force
-!   real(kind=8)                                   ::  l_rn, l_rt, l_rs
-!   real(kind=8), dimension(3)                     ::  vtk_cd_center, vtk_an_center, v_l_normal, v_l_t
-!   integer                                        ::  f_counter
-  
-!   ! Variables for the contact network
-!   character(:), allocatable                      ::  vtk_ctc_net
-!   character(:), allocatable                      ::  vtk_n_v_ctcnet
-!   integer                                        ::  ctc_counter
-!   character(len=6)                               ::  v_n_v_ctcnet
-!   real(kind=8)                                   ::  vtk_ave_rad, l_ctc_scale
-  
-  
-!   ! Cleaning or creating the folder if necessary
-!   if (first_over_all) then
-!     ! Asking if the file already exists
-!     inquire(file='./POSTPRO/VTK', exist=dir_vtk)
-!     if(dir_vtk) then
-!       ! Cleaning
-!       call system('rm ./POSTPRO/VTK/*')
-!     else
-!       ! Creating
-!       call system('mkdir ./POSTPRO/VTK')
-!     end if
-!   end if
-  
-!   ! Creating the file name for the particles
-!   write(vtk_c_temp, '(I6)') compteur_clout
-  
-  
-!   if (compteur_clout<10) then
-!     vtk_counter = vtk_c_temp(6:6)
-!   else if (compteur_clout >= 10 .and. compteur_clout < 100) then
-!     vtk_counter = vtk_c_temp(5:6)
-!   else if (compteur_clout >= 100 .and. compteur_clout<1000) then
-!     vtk_counter = vtk_c_temp(4:6)
-!   else
-!     print*, 'Cannot draw more than 1000 files'
-!     stop
-!   end if
-  
-!   vtk_part = './POSTPRO/VTK/rigid_' // vtk_counter // '.vtk'
-  
-!   open(unit=121, file=vtk_part, status='replace')
-!   write(121,'(A)') '# vtk DataFile Version 3.0'
-!   write(121,'(A,I6)') 'RIGID ', compteur_clout
-!   write(121,'(A)') 'ASCII'
-!   write(121,'(A)') 'DATASET POLYDATA'
-  
-!   ! Writing the number of vertices
-!   n_l_vertices = 0
-!   do i=1, n_particles
-!     n_l_vertices = n_l_vertices + TAB_POLYG(i)%nb_vertex 
-!   end do
-  
-!   ! Adding the vertices of the walls
-!   n_l_vertices = n_l_vertices + n_walls*4
-  
-!   write(v_n_vertices, '(I6)') n_l_vertices
-  
-!   vtk_n_points = 'POINTS ' // v_n_vertices // ' float'
-!   write(121,'(A)') vtk_n_points
-  
-!   ! Writing the coordinates of the vertices of particles and walls
-!   ! 3 vertices per row
-!   ! 
-!   k=0
-!   do i=1, n_particles + n_walls
-!     !write(121,*) 'Particle', i
-!     if (i .le. n_particles) then
-!       do j=1, TAB_POLYG(i)%nb_vertex
-!         k = k + 1
-!         if(k .lt. 3) then 
-!           if (TAB_POLYG(i)%vertex(1,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_POLYG(i)%vertex(1,j), ' '
-!           else
-!             write(121,'(F9.7,A)', advance = 'no') TAB_POLYG(i)%vertex(1,j), ' '
-!           end if
-          
-!           if (TAB_POLYG(i)%vertex(2,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_POLYG(i)%vertex(2,j), ' '
-!           else 
-!             write(121,'(F9.7,A)', advance = 'no') TAB_POLYG(i)%vertex(2,j), ' '
-!           end if
-          
-!           if (TAB_POLYG(i)%vertex(3,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_POLYG(i)%vertex(3,j), ' '
-!           else 
-!             write(121,'(F9.7,A)', advance = 'no') TAB_POLYG(i)%vertex(3,j), ' '
-!           end if
-!         else
-!           if (TAB_POLYG(i)%vertex(1,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_POLYG(i)%vertex(1,j), ' '
-!           else 
-!             write(121,'(F9.7,A)', advance = 'no') TAB_POLYG(i)%vertex(1,j), ' '
-!           end if
-          
-!           if (TAB_POLYG(i)%vertex(2,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_POLYG(i)%vertex(2,j), ' '
-!           else
-!             write(121,'(F9.7,A)', advance = 'no') TAB_POLYG(i)%vertex(2,j), ' '
-!           end if
-          
-!           if (TAB_POLYG(i)%vertex(3,j) .lt. 0) then
-!             write(121,'(F11.8,A)') TAB_POLYG(i)%vertex(3,j), ' '
-!           else 
-!             write(121,'(F9.7,A)') TAB_POLYG(i)%vertex(3,j), ' '
-!           end if
-!           k = 0
-!         end if
-!       end do
-!     else
-!       ! Writing the vertices of the walls
-!       do j=1, 4 ! each wall has 4 vertices
-!         k = k +1
-!         if(k .lt. 3) then 
-!           if (TAB_PLAN(i-n_particles)%vertex(1,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(1,j), ' '
-!           else
-!             write(121,'(F9.7,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(1,j), ' '
-!           end if
-          
-!           if (TAB_PLAN(i-n_particles)%vertex(2,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(2,j), ' '
-!           else 
-!             write(121,'(F9.7,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(2,j), ' '
-!           end if
-          
-!           if (TAB_PLAN(i-n_particles)%vertex(3,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(3,j), ' '
-!           else 
-!             write(121,'(F9.7,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(3,j), ' '
-!           end if
-!         else
-!           if (TAB_PLAN(i-n_particles)%vertex(1,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(1,j), ' '
-!           else 
-!             write(121,'(F9.7,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(1,j), ' '
-!           end if
-          
-!           if (TAB_PLAN(i-n_particles)%vertex(2,j) .lt. 0) then
-!             write(121,'(F11.8,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(2,j), ' '
-!           else 
-!             write(121,'(F9.7,A)', advance = 'no') TAB_PLAN(i-n_particles)%vertex(2,j), ' '
-!           end if
-          
-!           if (TAB_PLAN(i-n_particles)%vertex(3,j) .lt. 0) then
-!             write(121,'(F11.8,A)') TAB_PLAN(i-n_particles)%vertex(3,j), ' '
-!           else 
-!             write(121,'(F9.7,A)') TAB_PLAN(i-n_particles)%vertex(3,j), ' '
-!           end if
-          
-!           k = 0
-          
-!         end if
-!       end do
-!     end if
-!   end do
-  
-!   write(121, '(A)') ' '
-  
-!   ! Writing the conectivity between vertices
-!   ! Plus 4 walls
-!   write(121,'(A)', advance='no') 'POLYGONS '
-!   write(121, '(2(I6,A))') n_particles + n_walls, ' ' , (n_l_vertices + n_particles)+(n_walls)
-  
-!   curr_l_faces = 0
-  
-!   do i=1, n_particles
-!     !write(121,*) 'Particle', i
-!     ! Write the number of vertices
-!     write(121, '(I2,A)', advance= 'no') TAB_POLYG(i)%nb_vertex, ' '
+    curr_l_faces = curr_l_faces + 4
     
-!     ! Write its consecutive conectivity
-!     do j=1, TAB_POLYG(i)%nb_vertex
+  end do
+  
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!! FIELDS !!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  
+  ! How many fields there will be?
+  n_l_fields = 6                          ! They are: Id, Material, Disp, Veloc, Z (coordination), 
+                                          !           float, group
+  
+  ! A blank space
+  write(300,'(A)') ''
+  ! The cells begin
+  write(300,'(A)', advance='no') 'CELL_DATA'
+  
+  ! Writing the number of data by field. It corresponds to the same number of particles
+  write(300, '(2(I6,A))') n_bodies
+  write(300, '(A,I4)')  'FIELD FieldData', n_l_fields
+  
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Id
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  
+  ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
+  write(300,'(A,I1,I6,A)') 'Id ', 1, (n_bodies), ' float'
+  k = 0
+  l_counter = 0
+  do i=1, n_bodies
+    l_counter = l_counter + 1
+    
+    write(300, '(I6)') l_counter
+    
+  end do
+  ! And jump
+  !write(300, '(A)') ' '
+  
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Material
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  write(300,'(A,I1,I6,A)') 'Material ', 1, (n_bodies), ' float'
+  k = 0
+  l_counter = 1
+  
+  do i=1, n_bodies
+    if (i .le. n_bodies-n_wall) then
+      ! Material number 1
+      write(300, '(I6)') l_counter
+    else
+      l_counter = 2
       
-!       ! ... writing precisely 
-!       if (j .lt. TAB_POLYG(i)%nb_vertex) then
-!         if (curr_l_faces - 1 + j .lt. 10) then
-!           write(121, '(I1)', advance = 'no') curr_l_faces - 1 + j
-!         else if (curr_l_faces - 1 + j .lt. 100) then
-!           write(121, '(I2)', advance = 'no') curr_l_faces - 1 + j
-!         else if (curr_l_faces - 1 + j .lt. 1000) then
-!           write(121, '(I3)', advance = 'no') curr_l_faces - 1 + j
-!         else if (curr_l_faces - 1 + j .lt. 10000) then
-!           write(121, '(I4)', advance = 'no') curr_l_faces - 1 + j
-!         else if (curr_l_faces - 1 + j .lt. 100000) then
-!           write(121, '(I5)', advance = 'no') curr_l_faces - 1 + j
-!         end if
-        
-!         write(121, '(A)', advance='no') ' '
-        
-!       else
-!         if (curr_l_faces - 1 + j .lt. 10) then
-!           write(121, '(I1)') curr_l_faces - 1 + j
-!         else if (curr_l_faces - 1 + j .lt. 100) then
-!           write(121, '(I2)') curr_l_faces - 1 + j
-!         else if (curr_l_faces - 1 + j .lt. 1000) then
-!           write(121, '(I3)') curr_l_faces - 1 + j
-!         else if (curr_l_faces - 1 + j .lt. 10000) then
-!           write(121, '(I4)') curr_l_faces - 1 + j
-!         else if (curr_l_faces - 1 + j .lt. 100000) then
-!           write(121, '(I5)') curr_l_faces - 1 + j
-!         end if
-!       end if
+      write(300, '(I6)') l_counter
+    end if
+  end do
+  
+  ! And jump
+  !write(300, '(A)') ' '
+  
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Displacement
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  curr_l_vector(:) = 0.D0
+  
+  write(300,'(A,I1,I6,A)') 'Disp ', 3, (n_bodies), ' float'
+  k = 0
+  do i=1, n_bodies
+    ! For the particles
+    if (i .le. n_bodies-n_wall) then
+      curr_l_vector(1:2) = TAB_BODIES(i)%center(1:2) - TAB_BODIES(i)%center_ref(1:2)
+      curr_l_vector(3) = TAB_BODIES(i)%rot
+      write(300, '(3(F12.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+    else
+    !For the walls 
+      curr_l_vector(1:2) = TAB_BODIES(i)%center(1:2) - TAB_BODIES(i)%center_ref(1:2)
+      curr_l_vector(3) = TAB_BODIES(i)%rot
+      write(300, '(3(F12.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+    end if
+  end do
+  
+  ! And jump
+  !write(300, '(A)') ' '
+  
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Velocity
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  curr_l_vector(:) = 0.D0
+  
+  write(300,'(A,I1,I6,A)') 'Veloc ', 3, (n_bodies), ' float'
+  k = 0
+  do i=1, n_bodies
+    if (i .le. n_bodies-n_wall) then
+      curr_l_vector(1) = TAB_BODIES(i)%veloc(1)
+      curr_l_vector(2) = TAB_BODIES(i)%veloc(2)
+      curr_l_vector(3) = TAB_BODIES(i)%veloc(3)
       
-!     end do
-!     curr_l_faces = curr_l_faces + TAB_POLYG(i)%nb_vertex
-!   end do
-  
-!   ! Writing the conectivity for the walls
-!   ! For all the walls 
-!   do i=1, n_walls
-    
-!     !!!!! 1st (1-2-3-4)
-!     write(121, '(I1,A)', advance= 'no') 4, ' '
-    
-!     if (curr_l_faces .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces
-!     end if
-    
-!     write(121, '(A)', advance='no') ' '
-    
-!     if (curr_l_faces +1 .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces +1
-!     else if (curr_l_faces +1 .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces +1 
-!     end if
-    
-!     write(121, '(A)', advance='no') ' '
-    
-!     if (curr_l_faces +2 .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces +2
-!     else if (curr_l_faces +2 .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces +2 
-!     end if
-    
-!     write(121, '(A)', advance='no') ' '
-    
-!     if (curr_l_faces +3 .lt. 10) then
-!       write(121, '(I1)') curr_l_faces +3
-!     else if (curr_l_faces +3 .lt. 100) then
-!       write(121, '(I2)') curr_l_faces +3 
-!     else if (curr_l_faces +3 .lt. 1000) then
-!       write(121, '(I3)') curr_l_faces +3 
-!     else if (curr_l_faces +3 .lt. 10000) then
-!       write(121, '(I4)') curr_l_faces +3
-!     else if (curr_l_faces +3 .lt. 100000) then
-!       write(121, '(I5)') curr_l_faces +3
-!     end if
-    
-!     curr_l_faces = curr_l_faces + 4
-    
-!   end do
-  
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!! FIELDS !!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  
-!   ! How many fields there will be?
-!   n_l_fields = 7                          ! They are: Id, Material, Disp, Veloc, Spin, Z (coordination), group
-!                                           ! ...
-  
-!   ! A blank space
-!   write(121,'(A)') ''
-!   ! The cells begin
-!   write(121,'(A)', advance='no') 'CELL_DATA'
-  
-!   ! Writing the number of data by field. It corresponds to the same number of particles
-!   write(121, '(2(I6,A))') n_particles + n_walls
-!   write(121, '(A,I4)')  'FIELD FieldData', n_l_fields
-  
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Id
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  
-!   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
-!   write(121,'(A,I1,I6,A)') 'Id ', 1, (n_particles + n_walls), ' float'
-!   k = 0
-!   l_counter = 0
-!   do i=1, n_particles + n_walls
-!     l_counter = l_counter + 1
-    
-!     write(121, '(I6)') l_counter
-    
-!   end do
-!   ! And jump
-!   !write(121, '(A)') ' '
-  
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Material
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   write(121,'(A,I1,I6,A)') 'Material ', 1, (n_particles + n_walls), ' float'
-!   k = 0
-!   l_counter = 1
-  
-!   do i=1, n_particles + n_walls
-!     if (i .le. n_particles) then
-!       ! Material number 1
-!       write(121, '(I6)') l_counter
-!     else
-!       ! Material number 2
-!       if (i==n_particles+1) then
-!         l_counter = l_counter +1
-!       end if
+      write(300, '(3(F13.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+    else
+      curr_l_vector(1) = TAB_BODIES(i)%veloc(1)
+      curr_l_vector(2) = TAB_BODIES(i)%veloc(2)
+      curr_l_vector(3) = TAB_BODIES(i)%veloc(3)
       
-!       write(121, '(I6)') l_counter
-!     end if
-!   end do
+      write(300, '(3(F13.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+    end if
+  end do
   
-!   ! And jump
-!   !write(121, '(A)') ' '
+  ! And jump
+  !write(300, '(A)') ' '
   
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Displacement
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   curr_l_vector(:) = 0.D0
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Coordination
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  l_counter = 0
   
-!   write(121,'(A,I1,I6,A)') 'Disp ', 3, (n_particles + n_walls), ' float'
-!   k = 0
-!   do i=1, n_particles + n_walls
-!     ! For the particles
-!     if (i .le. n_particles) then
-!       curr_l_vector(:) = TAB_POLYG(i)%center(:) - TAB_POLYG(i)%center_ref
-!       write(121, '(3(F12.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
-!     else
-!     !For the walls 
-!       curr_l_vector(:) = TAB_PLAN(i-n_particles)%center(:) - TAB_PLAN(i-n_particles)%center_ref
-!       write(121, '(3(F12.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
-!     end if
-!   end do
-  
-!   ! And jump
-!   !write(121, '(A)') ' '
-  
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Velocity
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   curr_l_vector(:) = 0.D0
-  
-!   write(121,'(A,I1,I6,A)') 'Veloc ', 3, (n_particles + n_walls), ' float'
-!   k = 0
-!   do i=1, n_particles + n_walls
-!     if (i .le. n_particles) then
-!       curr_l_vector(1) = TAB_POLYG(i)%V(1)
-!       curr_l_vector(2) = TAB_POLYG(i)%V(2)
-!       curr_l_vector(3) = TAB_POLYG(i)%V(3)
+  write(300,'(A,I1,I6,A)') 'Z ', 1, (n_bodies), ' float'
+  k = 0
+  do i=1, n_bodies
+    l_counter = 0
+    if (i .le. n_bodies - n_wall) then
+      ! Counting the number of contacts      
+      write(300, '(I4,A)') TAB_BODIES(i)%n_ctc
       
-!       write(121, '(3(F13.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
-!     else
-!       curr_l_vector(1) = TAB_PLAN(i-n_particles)%V(1)
-!       curr_l_vector(2) = TAB_PLAN(i-n_particles)%V(2)
-!       curr_l_vector(3) = TAB_PLAN(i-n_particles)%V(3)
-      
-!       write(121, '(3(F13.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
-!     end if
-!   end do
+    else
+      write(300, '(I4,A)') 0
+    end if
+  end do
   
-!   ! And jump
-!   !write(121, '(A)') ' '
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Float
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  l_counter = 0
   
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Coordination
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   l_counter = 0
+  write(300,'(A,I1,I6,A)') 'Float_stat ', 1, (n_bodies), ' float'
+  k = 0
+  do i=1, n_bodies
+    l_counter = 0
+    if (i .le. n_bodies-n_wall) then
+      !
+      if (TAB_BODIES(i)%n_ctc .lt. 2) then
+        write(300, '(I4,A)') 0
+      else 
+        write(300, '(I4,A)') 1
+      end if
+    else
+      write(300, '(I4,A)') -1
+    end if
+  end do
   
-!   write(121,'(A,I1,I6,A)') 'Z ', 1, (n_particles + n_walls), ' float'
-!   k = 0
-!   do i=1, n_particles + n_walls
-!     l_counter = 0
-!     if (i .le. n_particles) then
-!       ! Counting the number of contacts
-!       do j=1, nb_ligneCONTACT_POLYG
-!         l_cdt = TAB_CONTACTS_POLYG(j)%icdent
-!         l_ant = TAB_CONTACTS_POLYG(j)%ianent
-        
-!         if(TAB_POLYG(l_cdt)%behav /= 'PLEXx' .or. TAB_POLYG(l_ant)%behav /= 'PLEXx') cycle
-!         if(l_cdt == i .or. l_ant == i) then
-!           l_counter = l_counter + 1
-!         end if
-!       end do
-      
-!       write(121, '(I4,A)') l_counter
-      
-!     else
-!       write(121, '(I4,A)') 0
-!     end if
-!   end do
-  
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Float
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   l_counter = 0
-  
-!   write(121,'(A,I1,I6,A)') 'Float_stat ', 1, (n_particles + n_walls), ' float'
-!   k = 0
-!   do i=1, n_particles + n_walls
-!     l_counter = 0
-!     if (i .le. n_particles) then
-!       ! Counting the number of contacts
-!       do j=1, nb_ligneCONTACT_POLYG
-        
-!         if(TAB_CONTACTS_POLYG(j)%nature /= 'PLPLx') cycle
-        
-!         l_cdt = TAB_CONTACTS_POLYG(j)%icdent
-!         l_ant = TAB_CONTACTS_POLYG(j)%ianent
-        
-!         if(TAB_POLYG(l_cdt)%behav /= 'PLEXx' .or. TAB_POLYG(l_ant)%behav /= 'PLEXx') cycle
-!         if(l_cdt == i .or. l_ant == i) then
-!           ! Only active contacts
-!           if (abs(TAB_CONTACTS_POLYG(j)%rn) .gt. 0.0) then
-!             l_counter = l_counter + 1
-!           end if
-!         end if
-!       end do
-      
-!       if (l_counter == 0) then
-!         write(121, '(I4,A)') 1
-!       else 
-!         write(121, '(I4,A)') 0
-!       end if
-!     else
-!       write(121, '(I4,A)') -1
-!     end if
-!   end do
-  
-!   ! And jump
-!   !write(121, '(A)') ' '
+  ! And jump
+  !write(300, '(A)') ' '
 
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Group
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Group
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   write(121,'(A,I1,I6,A)') 'Group ', 1, (n_particles + n_walls), ' float'
-!   k = 0
-!   l_counter = 1
+  ! write(300,'(A,I1,I6,A)') 'Group ', 1, (n_particles + n_walls), ' float'
+  ! k = 0
+  ! l_counter = 1
   
-!   do i=1, n_particles + n_walls
-!     if (i .le. n_particles) then
-!       ! Material number 1
-!       write(121, '(I6)') TAB_POLYG(i)%group
-!     else      
-!       write(121, '(I6)') -1
-!     end if
-!   end do
+  ! do i=1, n_particles + n_walls
+  !   if (i .le. n_particles) then
+  !     ! Material number 1
+  !     write(300, '(I6)') TAB_POLYG(i)%group
+  !   else      
+  !     write(300, '(I6)') -1
+  !   end if
+  ! end do
   
-!   ! And jump
-!   !write(121, '(A)') ' '
+  ! And jump
+  !write(300, '(A)') ' '
   
-!   ! Closing the files of the particles
-!   close(121)
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!  FORCES   !!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! Closing the files of the particles
+  close(300)
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!  FORCES   !!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   vtk_forces = './POSTPRO/VTK/forces_' // vtk_counter // '.vtk'
+  vtk_forces = './POSTPRO/VTK/forces_' // vtk_counter // '.vtk'
   
-!   open(unit=121, file=vtk_forces, status='replace')
-!   write(121,'(A)') '# vtk DataFile Version 3.0'
-!   write(121,'(A,I6)') 'FORCES ', compteur_clout
-!   write(121,'(A)') 'ASCII'
-!   write(121,'(A)') 'DATASET POLYDATA'
+  open(unit=300, file=vtk_forces, status='replace')
+  write(300,'(A)') '# vtk DataFile Version 3.0'
+  write(300,'(A,I6)') 'FORCES ', i_
+  write(300,'(A)') 'ASCII'
+  write(300,'(A)') 'DATASET POLYDATA'
   
-!   ! Writing the number of vertices for the forces. These are parallelepipeds joining the center of 
-!   ! particles in contact
-!   ! Four vertices for each parallelepiped
-!   f_counter = 0
-!   do i=1, nb_ligneCONTACT_POLYG
-!     if(TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
-!     f_counter = f_counter + 1
-!   end do
+  ! Writing the number of vertices for the forces. These are parallelepipeds joining the center of 
+  ! particles in contact
+  ! Four vertices for each parallelepiped
+  f_counter = 0
+  do i=1, n_contacts
+    if(TAB_CONTACTS(i)%nature /= 'PLPLx') cycle
+    f_counter = f_counter + 1
+  end do
   
-!   write(v_n_v_forces, '(I6)') f_counter * 4
+  write(v_n_v_forces, '(I6)') f_counter * 4
   
-!   vtk_n_v_forces = 'POINTS' // v_n_v_forces // ' float'
-!   write(121,'(A)') vtk_n_v_forces
+  vtk_n_v_forces = 'POINTS' // v_n_v_forces // ' float'
+  write(300,'(A)') vtk_n_v_forces
   
-!   ! Finding the average force
-!   vtk_ave_force = 0.D0
+  ! Finding the average force
+  vtk_ave_force = 0.D0
   
-!   do i = 1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
-!     vtk_ave_force = vtk_ave_force + abs(TAB_CONTACTS_POLYG(i)%rn)
-!   end do
+  do i = 1, n_contacts
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx') cycle
+    vtk_ave_force = vtk_ave_force + abs(TAB_CONTACTS(i)%rn)
+  end do
   
-!   vtk_ave_force = vtk_ave_force/nb_ligneCONTACT_POLYG
+  vtk_ave_force = vtk_ave_force/n_contacts
   
-!   ! Force scale parameter
-!   l_force_scale = 0.D0
-!   do i=1, n_particles
-!     l_force_scale = l_force_scale + TAB_POLYG(i)%radius
-!   end do
+  ! Force scale parameter
+  l_force_scale = 0.D0
+  do i=1, n_bodies - n_wall
+    l_force_scale = l_force_scale + TAB_BODIES(i)%radius
+  end do
 
-!   ! The scale is here!
-!   ! 5% of average radius
-!   l_force_scale = (l_force_scale/n_particles)*0.05
+  ! The scale is here!
+  ! 5% of average radius
+  l_force_scale = (l_force_scale/(n_bodies-n_wall))*0.05
   
-!   k=0
-!   do i=1, nb_ligneCONTACT_POLYG
+  k=0
+  do i=1, n_contacts
     
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
-!     ! The particles ids
-!     l_cdt = TAB_CONTACTS_POLYG(i)%icdent
-!     l_ant = TAB_CONTACTS_POLYG(i)%ianent
-!     ! The center of each particle
-!     vtk_cd_center(:) = TAB_POLYG(l_cdt)%center(:)
-!     vtk_an_center(:) = TAB_POLYG(l_ant)%center(:)
-!     ! The normal and tangential vectors
-!     v_l_normal(:) = TAB_CONTACTS_POLYG(i)%n(:)
-!     v_l_t(:) = TAB_CONTACTS_POLYG(i)%t(:)
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx') cycle
+    ! The particles ids
+    l_cdt = TAB_CONTACTS(i)%cd
+    l_ant = TAB_CONTACTS(i)%an
+    ! The center of each particle
+    vtk_cd_center(1:2) = TAB_BODIES(l_cdt)%center(1:2)
+    vtk_an_center(1:2) = TAB_BODIES(l_ant)%center(1:2)
+    ! The normal and tangential vectors
+    v_l_normal(1:2) = TAB_CONTACTS(i)%n_frame(1:2)
+    v_l_t(1:2) = TAB_CONTACTS(i)%t_frame(1:2)
     
-!     ! The forces
-!     l_rn = TAB_CONTACTS_POLYG(i)%rn
-!     l_rt = TAB_CONTACTS_POLYG(i)%rt
+    ! The forces
+    l_rn = TAB_CONTACTS(i)%rn
+    l_rt = TAB_CONTACTS(i)%rt
     
-!     l_force = (l_rn/vtk_ave_force)*l_force_scale
+    l_force = (l_rn/vtk_ave_force)*l_force_scale
     
-!     ! Write! ... 4 vertices for each line
+    ! Write! ... 4 vertices for each line
     
-!     ! Candidate --- First vertex. 
-!     write(121, '(3(F15.7,A))', advance='no') vtk_cd_center(1)+l_force*v_l_t(1), ' ', &
-!                                              vtk_cd_center(2)+l_force*v_l_t(2), ' ', &
-!                                              vtk_cd_center(3), ' '
-!     ! Candidate --- Second vertex. 
-!     write(121, '(3(F15.7,A))', advance='no') vtk_cd_center(1)-l_force*v_l_t(1), ' ', &
-!                                              vtk_cd_center(2)-l_force*v_l_t(2), ' ', &
-!                                              vtk_cd_center(3), ' '
-!     ! Candidate --- Third vertex. 
-!     write(121, '(3(F15.7,A))', advance='no') vtk_an_center(1)-l_force*v_l_t(1), ' ', &
-!                                              vtk_an_center(2)-l_force*v_l_t(2), ' ', &
-!                                              vtk_an_center(3), ' '
-!     ! Candidate --- 4th vertex. 
-!     write(121, '(3(F15.7,A))') vtk_an_center(1)+l_force*v_l_t(1), ' ', &
-!                                vtk_an_center(2)+l_force*v_l_t(2), ' ', &
-!                                vtk_an_center(3), ' '
-!   end do
+    ! Candidate --- First vertex. 
+    write(300, '(3(F15.7,A))', advance='no') vtk_cd_center(1)+l_force*v_l_t(1), ' ', &
+                                             vtk_cd_center(2)+l_force*v_l_t(2), ' ', &
+                                             vtk_cd_center(3), ' '
+    ! Candidate --- Second vertex. 
+    write(300, '(3(F15.7,A))', advance='no') vtk_cd_center(1)-l_force*v_l_t(1), ' ', &
+                                             vtk_cd_center(2)-l_force*v_l_t(2), ' ', &
+                                             vtk_cd_center(3), ' '
+    ! Candidate --- Third vertex. 
+    write(300, '(3(F15.7,A))', advance='no') vtk_an_center(1)-l_force*v_l_t(1), ' ', &
+                                             vtk_an_center(2)-l_force*v_l_t(2), ' ', &
+                                             vtk_an_center(3), ' '
+    ! Candidate --- 4th vertex. 
+    write(300, '(3(F15.7,A))') vtk_an_center(1)+l_force*v_l_t(1), ' ', &
+                               vtk_an_center(2)+l_force*v_l_t(2), ' ', &
+                               vtk_an_center(3), ' '
+  end do
   
-!   ! Writing the conectivity
-!   write(121,'(A)', advance='no') 'POLYGONS '
-!   ! 6 faces for each parallepiped
-!   write(121, '(2(I6,A))') f_counter, ' ' , (f_counter*5)
+  ! Writing the conectivity
+  write(300,'(A)', advance='no') 'POLYGONS '
+  ! 6 faces for each parallepiped
+  write(300, '(2(I6,A))') f_counter, ' ' , (f_counter*5)
   
-!   curr_l_faces = 0
+  curr_l_faces = 0
   
-!   do i=1, nb_ligneCONTACT_POLYG
-!     ! Conecting the 4 vertices for each rectangle
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
+  do i=1, n_contacts
+    ! Conecting the 4 vertices for each rectangle
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx') cycle
     
-!     !!!!! 1st (1-2-3-4)
-!     write(121, '(I1,A)', advance= 'no') 4, ' '
+    !!!!! 1st (1-2-3-4)
+    write(300, '(I1,A)', advance= 'no') 4, ' '
     
-!     if (curr_l_faces .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces
-!     end if
+    if (curr_l_faces .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces
+    end if
     
-!     write(121, '(A)', advance='no') ' '
+    write(300, '(A)', advance='no') ' '
     
-!     if (curr_l_faces +1 .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces +1
-!     else if (curr_l_faces +1 .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces +1 
-!     end if
+    if (curr_l_faces +1 .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces +1
+    else if (curr_l_faces +1 .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces +1 
+    end if
     
-!     write(121, '(A)', advance='no') ' '
+    write(300, '(A)', advance='no') ' '
     
-!     if (curr_l_faces +2 .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces +2
-!     else if (curr_l_faces +2 .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces +2 
-!     end if
+    if (curr_l_faces +2 .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces +2
+    else if (curr_l_faces +2 .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces +2 
+    end if
     
-!     write(121, '(A)', advance='no') ' '
+    write(300, '(A)', advance='no') ' '
     
-!     if (curr_l_faces +3 .lt. 10) then
-!       write(121, '(I1)') curr_l_faces +3
-!     else if (curr_l_faces +3 .lt. 100) then
-!       write(121, '(I2)') curr_l_faces +3 
-!     else if (curr_l_faces +3 .lt. 1000) then
-!       write(121, '(I3)') curr_l_faces +3 
-!     else if (curr_l_faces +3 .lt. 10000) then
-!       write(121, '(I4)') curr_l_faces +3
-!     else if (curr_l_faces +3 .lt. 100000) then
-!       write(121, '(I5)') curr_l_faces +3
-!     end if
+    if (curr_l_faces +3 .lt. 10) then
+      write(300, '(I1)') curr_l_faces +3
+    else if (curr_l_faces +3 .lt. 100) then
+      write(300, '(I2)') curr_l_faces +3 
+    else if (curr_l_faces +3 .lt. 1000) then
+      write(300, '(I3)') curr_l_faces +3 
+    else if (curr_l_faces +3 .lt. 10000) then
+      write(300, '(I4)') curr_l_faces +3
+    else if (curr_l_faces +3 .lt. 100000) then
+      write(300, '(I5)') curr_l_faces +3
+    end if
     
-!     curr_l_faces = curr_l_faces + 4
+    curr_l_faces = curr_l_faces + 4
     
-!   end do
+  end do
   
   
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!! FORCES FIELDS !!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!! FORCES FIELDS !!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   ! How many fields there will be?
-!   n_l_fields = 4                          ! They are: Type force (Compression - tension), Rn, Rt, status
-!                                           ! ...
+  ! How many fields there will be?
+  n_l_fields = 4                          ! They are: Type force (Compression - tension), Rn, Rt, status
+                                          ! ...
   
-!   ! A blank space
-!   write(121,'(A)') ''
-!   ! The cells begin
-!   write(121,'(A)', advance='no') 'CELL_DATA'
+  ! A blank space
+  write(300,'(A)') ''
+  ! The cells begin
+  write(300,'(A)', advance='no') 'CELL_DATA'
   
-!   ! Writing the number of data by field. It corresponds to the same number of forces
-!   write(121, '(2(I6,A))') f_counter
-!   write(121, '(A,I4)')  'FIELD FieldData', n_l_fields
+  ! Writing the number of data by field. It corresponds to the same number of forces
+  write(300, '(2(I6,A))') f_counter
+  write(300, '(A,I4)')  'FIELD FieldData', n_l_fields
   
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Type force (1 Compression, -1 Tension)
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Type force (1 Compression, -1 Tension)
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
-!   write(121,'(A,I1,I6,A)') 'Type ', 1, f_counter, ' float'
+  ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
+  write(300,'(A,I1,I6,A)') 'Type ', 1, f_counter, ' float'
   
-!   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
+  do i=1, n_contacts
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx') cycle
     
-!     if (TAB_CONTACTS_POLYG(i)%rn .lt. 0) then
-!       write(121, '(I3)') -1
-!     else
-!       write(121, '(I3)') 1
-!     end if
-!   end do
+    if (TAB_CONTACTS(i)%rn .lt. 0) then
+      write(300, '(I3)') -1
+    else
+      write(300, '(I3)') 1
+    end if
+  end do
   
-!   ! And jump
-!   write(121, '(A)') ' '
+  ! And jump
+  write(300, '(A)') ' '
   
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Normal Force
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Normal Force
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
-!   write(121,'(A,I1,I6,A)') 'RN ', 1, f_counter, ' float'
-!   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
-!     write(121, '(F15.7)') TAB_CONTACTS_POLYG(i)%rn
-!   end do
+  ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
+  write(300,'(A,I1,I6,A)') 'RN ', 1, f_counter, ' float'
+  do i=1, n_contacts
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx') cycle
+    write(300, '(F15.7)') TAB_CONTACTS(i)%rn
+  end do
   
-!   ! And jump
-!   write(121, '(A)') ' '
+  ! And jump
+  write(300, '(A)') ' '
   
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Tangential force (Rs)
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Tangential force (Rs)
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
-!   write(121,'(A,I1,I6,A)') 'RT ', 1, f_counter, ' float'
-!   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
-!     write(121, '(F15.7)') abs(TAB_CONTACTS_POLYG(i)%rt)
-!   end do
+  ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
+  write(300,'(A,I1,I6,A)') 'RT ', 1, f_counter, ' float'
+  do i=1, n_contacts
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx') cycle
+    write(300, '(F15.7)') abs(TAB_CONTACTS(i)%rt)
+  end do
   
-!   ! And jump
-!   write(121, '(A)') ' '
+  ! And jump
+  write(300, '(A)') ' '
 
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Status (3: noctc, 2 Sli, 1 Stick, -1 Wnctc, -2Wsli, -3 Wstck)
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Status (3: noctc, 2 Sli, 1 Stick, -1 Wnctc, -2Wsli, -3 Wstck)
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
-!   write(121,'(A,I1,I6,A)') 'Status ', 1, f_counter, ' float'
-!   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx') cycle
-!     write(121, '(I2)') TAB_CONTACTS_POLYG(i)%status_points
-!   end do
+  ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
+  write(300,'(A,I1,I6,A)') 'Status ', 1, f_counter, ' float'
+  do i=1, n_contacts
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx') cycle
+    write(300, '(I2)') 0 !TAB_CONTACTS(i)%status_points
+  end do
   
-!   ! And jump
-!   write(121, '(A)') ' '
+  ! And jump
+  write(300, '(A)') ' '
   
-!   close(121)
+  close(300)
   
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!  ONLY CONTACT NETWORK   !!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!  ONLY CONTACT NETWORK   !!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   vtk_ctc_net = './POSTPRO/VTK/ctc_nt_' // vtk_counter // '.vtk'
+  vtk_ctc_net = './POSTPRO/VTK/ctc_nt_' // vtk_counter // '.vtk'
   
-!   open(unit=121, file=vtk_ctc_net, status='replace')
-!   write(121,'(A)') '# vtk DataFile Version 3.0'
-!   write(121,'(A,I6)') 'CONTACT NETWORK ', compteur_clout
-!   write(121,'(A)') 'ASCII'
-!   write(121,'(A)') 'DATASET POLYDATA'
+  open(unit=300, file=vtk_ctc_net, status='replace')
+  write(300,'(A)') '# vtk DataFile Version 3.0'
+  write(300,'(A,I6)') 'CONTACT NETWORK ', i_
+  write(300,'(A)') 'ASCII'
+  write(300,'(A)') 'DATASET POLYDATA'
   
-!   ! Writing the number of vertices for the contact network. These are parallelepipeds joining the center of 
-!   ! particles in contact
-!   ! Four vertices for each parallelepiped
-!   ctc_counter = 0
-!   do i=1, nb_ligneCONTACT_POLYG
-!     if(TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACTS_POLYG(i)%gap > 0.1E-2) cycle
-!     if (TAB_CONTACTS_POLYG(i)%type == 1) cycle
-!     ctc_counter = ctc_counter + 1
-!   end do
+  ! Writing the number of vertices for the contact network. These are parallelepipeds joining the center of 
+  ! particles in contact
+  ! Four vertices for each parallelepiped
+  ctc_counter = 0
+  do i=1, n_contacts
+    if(TAB_CONTACTS(i)%nature /= 'PLPLx' .or. TAB_CONTACTS(i)%gap > 0.1E-2) cycle
+    !if (TAB_CONTACTS(i)%type == 1) cycle
+    ctc_counter = ctc_counter + 1
+  end do
   
-!   write(v_n_v_ctcnet, '(I6)') ctc_counter * 4
+  write(v_n_v_ctcnet, '(I6)') ctc_counter * 4
   
-!   vtk_n_v_ctcnet = 'POINTS' // v_n_v_ctcnet // ' float'
-!   write(121,'(A)') vtk_n_v_ctcnet
+  vtk_n_v_ctcnet = 'POINTS' // v_n_v_ctcnet // ' float'
+  write(300,'(A)') vtk_n_v_ctcnet
   
-!   ! Finding the average radius
-!   vtk_ave_rad = 0.D0
+  ! Finding the average radius
+  vtk_ave_rad = 0.D0
   
-!   do i = 1, n_particles
-!     vtk_ave_rad = vtk_ave_rad + TAB_POLYG(i)%radius
-!   end do
+  do i = 1, n_bodies-n_wall
+    vtk_ave_rad = vtk_ave_rad + TAB_BODIES(i)%radius
+  end do
   
-!   vtk_ave_rad = vtk_ave_rad/n_particles
+  vtk_ave_rad = vtk_ave_rad/(n_bodies-n_wall)
   
-!   ! The scale is here!
-!   ! 5% of average radius
-!   l_ctc_scale = (vtk_ave_rad)*0.05
+  ! The scale is here!
+  ! 5% of average radius
+  l_ctc_scale = (vtk_ave_rad)*0.05
   
-!   k=0
-!   do i=1, nb_ligneCONTACT_POLYG
+  k=0
+  do i=1, n_contacts
   
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACTS_POLYG(i)%gap > 0.1E-2) cycle
-!     if (TAB_CONTACTS_POLYG(i)%type == 1) cycle
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx' .or. TAB_CONTACTS(i)%gap > 0.1E-2) cycle
+    !if (TAB_CONTACTS(i)%type == 1) cycle
     
-!     ! The particles ids
-!     l_cdt = TAB_CONTACTS_POLYG(i)%icdent
-!     l_ant = TAB_CONTACTS_POLYG(i)%ianent
-!     ! The center of each particle
-!     vtk_cd_center(:) = TAB_POLYG(l_cdt)%center(:)
-!     vtk_an_center(:) = TAB_POLYG(l_ant)%center(:)
-!     ! The normal and tangential vectors
-!     v_l_normal(:) = TAB_CONTACTS_POLYG(i)%n(:)
-!     v_l_t(:) = TAB_CONTACTS_POLYG(i)%t(:)
+    ! The particles ids
+    l_cdt = TAB_CONTACTS(i)%cd 
+    l_ant = TAB_CONTACTS(i)%an
+    ! The center of each particle
+    vtk_cd_center(1:2) = TAB_BODIES(l_cdt)%center(1:2)
+    vtk_an_center(1:2) = TAB_BODIES(l_ant)%center(1:2)
+    ! The normal and tangential vectors
+    v_l_normal(1:2) = TAB_CONTACTS(i)%n_frame(1:2)
+    v_l_t(1:2) = TAB_CONTACTS(i)%t_frame(1:2)
     
-!     ! Write! ... 4 vertices for each line
+    ! Write! ... 4 vertices for each line
     
-!     ! Candidate --- First vertex. 
-!     write(121, '(3(F15.7,A))', advance='no') vtk_cd_center(1)+l_ctc_scale*v_l_t(1), ' ', &
-!                                              vtk_cd_center(2)+l_ctc_scale*v_l_t(2), ' ', &
-!                                              0.D0, ' '
-!     ! Candidate --- Second vertex. 
-!     write(121, '(3(F15.7,A))', advance='no') vtk_cd_center(1)-l_ctc_scale*v_l_t(1), ' ', &
-!                                              vtk_cd_center(2)-l_ctc_scale*v_l_t(2), ' ', &
-!                                              0.D0, ' '
-!     ! Candidate --- Third vertex. 
-!     write(121, '(3(F15.7,A))', advance='no') vtk_an_center(1)-l_ctc_scale*v_l_t(1), ' ', &
-!                                              vtk_an_center(2)-l_ctc_scale*v_l_t(2), ' ', &
-!                                              0.D0, ' '
-!     ! Candidate --- 4th vertex. 
-!     write(121, '(3(F15.7,A))') vtk_an_center(1)+l_ctc_scale*v_l_t(1), ' ', &
-!                                vtk_an_center(2)+l_ctc_scale*v_l_t(2), ' ', &
-!                                0.D0, ' '
-!   end do
+    ! Candidate --- First vertex. 
+    write(300, '(3(F15.7,A))', advance='no') vtk_cd_center(1)+l_ctc_scale*v_l_t(1), ' ', &
+                                             vtk_cd_center(2)+l_ctc_scale*v_l_t(2), ' ', &
+                                             0.D0, ' '
+    ! Candidate --- Second vertex. 
+    write(300, '(3(F15.7,A))', advance='no') vtk_cd_center(1)-l_ctc_scale*v_l_t(1), ' ', &
+                                             vtk_cd_center(2)-l_ctc_scale*v_l_t(2), ' ', &
+                                             0.D0, ' '
+    ! Candidate --- Third vertex. 
+    write(300, '(3(F15.7,A))', advance='no') vtk_an_center(1)-l_ctc_scale*v_l_t(1), ' ', &
+                                             vtk_an_center(2)-l_ctc_scale*v_l_t(2), ' ', &
+                                             0.D0, ' '
+    ! Candidate --- 4th vertex. 
+    write(300, '(3(F15.7,A))') vtk_an_center(1)+l_ctc_scale*v_l_t(1), ' ', &
+                               vtk_an_center(2)+l_ctc_scale*v_l_t(2), ' ', &
+                               0.D0, ' '
+  end do
   
-!   ! Writing the conectivity
-!   write(121,'(A)', advance='no') 'POLYGONS '
-!   ! 6 faces for each parallepiped
-!   write(121, '(2(I6,A))') ctc_counter, ' ' , (ctc_counter*5)
+  ! Writing the conectivity
+  write(300,'(A)', advance='no') 'POLYGONS '
+  ! 6 faces for each parallepiped
+  write(300, '(2(I6,A))') ctc_counter, ' ' , (ctc_counter*5)
   
-!   curr_l_faces = 0
+  curr_l_faces = 0
   
-!   do i=1, nb_ligneCONTACT_POLYG
-!     ! Conecting the 4 vertices for each rectangle
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACTS_POLYG(i)%gap > 0.1E-2) cycle
-!     if (TAB_CONTACTS_POLYG(i)%type == 1) cycle
+  do i=1, n_contacts
+    ! Conecting the 4 vertices for each rectangle
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx' .or. TAB_CONTACTS(i)%gap > 0.1E-2) cycle
+    !if (TAB_CONTACTS(i)%type == 1) cycle
     
-!     !!!!! 1st (1-2-3-4)
-!     write(121, '(I1,A)', advance= 'no') 4, ' '
+    !!!!! 1st (1-2-3-4)
+    write(300, '(I1,A)', advance= 'no') 4, ' '
     
-!     if (curr_l_faces .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces
-!     else if (curr_l_faces .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces
-!     end if
+    if (curr_l_faces .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces
+    else if (curr_l_faces .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces
+    end if
     
-!     write(121, '(A)', advance='no') ' '
+    write(300, '(A)', advance='no') ' '
     
-!     if (curr_l_faces +1 .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces +1 
-!     else if (curr_l_faces +1 .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces +1
-!     else if (curr_l_faces +1 .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces +1 
-!     end if
+    if (curr_l_faces +1 .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces +1 
+    else if (curr_l_faces +1 .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces +1
+    else if (curr_l_faces +1 .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces +1 
+    end if
     
-!     write(121, '(A)', advance='no') ' '
+    write(300, '(A)', advance='no') ' '
     
-!     if (curr_l_faces +2 .lt. 10) then
-!       write(121, '(I1)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 100) then
-!       write(121, '(I2)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 1000) then
-!       write(121, '(I3)', advance = 'no') curr_l_faces +2 
-!     else if (curr_l_faces +2 .lt. 10000) then
-!       write(121, '(I4)', advance = 'no') curr_l_faces +2
-!     else if (curr_l_faces +2 .lt. 100000) then
-!       write(121, '(I5)', advance = 'no') curr_l_faces +2 
-!     end if
+    if (curr_l_faces +2 .lt. 10) then
+      write(300, '(I1)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 100) then
+      write(300, '(I2)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 1000) then
+      write(300, '(I3)', advance = 'no') curr_l_faces +2 
+    else if (curr_l_faces +2 .lt. 10000) then
+      write(300, '(I4)', advance = 'no') curr_l_faces +2
+    else if (curr_l_faces +2 .lt. 100000) then
+      write(300, '(I5)', advance = 'no') curr_l_faces +2 
+    end if
     
-!     write(121, '(A)', advance='no') ' '
+    write(300, '(A)', advance='no') ' '
     
-!     if (curr_l_faces +3 .lt. 10) then
-!       write(121, '(I1)') curr_l_faces +3
-!     else if (curr_l_faces +3 .lt. 100) then
-!       write(121, '(I2)') curr_l_faces +3 
-!     else if (curr_l_faces +3 .lt. 1000) then
-!       write(121, '(I3)') curr_l_faces +3 
-!     else if (curr_l_faces +3 .lt. 10000) then
-!       write(121, '(I4)') curr_l_faces +3
-!     else if (curr_l_faces +3 .lt. 100000) then
-!       write(121, '(I5)') curr_l_faces +3
-!     end if
+    if (curr_l_faces +3 .lt. 10) then
+      write(300, '(I1)') curr_l_faces +3
+    else if (curr_l_faces +3 .lt. 100) then
+      write(300, '(I2)') curr_l_faces +3 
+    else if (curr_l_faces +3 .lt. 1000) then
+      write(300, '(I3)') curr_l_faces +3 
+    else if (curr_l_faces +3 .lt. 10000) then
+      write(300, '(I4)') curr_l_faces +3
+    else if (curr_l_faces +3 .lt. 100000) then
+      write(300, '(I5)') curr_l_faces +3
+    end if
     
-!     curr_l_faces = curr_l_faces + 4
+    curr_l_faces = curr_l_faces + 4
     
-!   end do
+  end do
   
 
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!! CONTACT FIELDS !!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   ! How many fields there will be?
-!   n_l_fields = 1                          ! They are: Status
-!                                           ! ...
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!! CONTACT FIELDS !!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! How many fields there will be?
+  n_l_fields = 1                          ! They are: Status
+                                          ! ...
   
-!   ! A blank space
-!   write(121,'(A)') ''
-!   ! The cells begin
-!   write(121,'(A)', advance='no') 'CELL_DATA'
+  ! A blank space
+  write(300,'(A)') ''
+  ! The cells begin
+  write(300,'(A)', advance='no') 'CELL_DATA'
   
-!   ! Writing the number of data by field. It corresponds to the same number of forces
-!   write(121, '(2(I6,A))') ctc_counter
-!   write(121, '(A,I4)')  'FIELD FieldData', n_l_fields
+  ! Writing the number of data by field. It corresponds to the same number of forces
+  write(300, '(2(I6,A))') ctc_counter
+  write(300, '(A,I4)')  'FIELD FieldData', n_l_fields
   
 
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Status (3: noctc, 2 Sli, 1 Stick, -1 Wnctc, -2Wsli, -3 Wstck)
-!   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Status (3: noctc, 2 Sli, 1 Stick, -1 Wnctc, -2Wsli, -3 Wstck)
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-!   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
-!   write(121,'(A,I1,I6,A)') 'Status ', 1, ctc_counter, ' float'
-!   do i=1, nb_ligneCONTACT_POLYG
-!     if (TAB_CONTACTS_POLYG(i)%nature /= 'PLPLx' .or. TAB_CONTACTS_POLYG(i)%gap > 0.1E-2) cycle
-!     if (TAB_CONTACTS_POLYG(i)%type == 1) cycle
-!     write(121, '(I2)') TAB_CONTACTS_POLYG(i)%status_points
-!   end do
+  ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
+  write(300,'(A,I1,I6,A)') 'Status ', 1, ctc_counter, ' float'
+  do i=1, n_contacts
+    if (TAB_CONTACTS(i)%nature /= 'PLPLx' .or. TAB_CONTACTS(i)%gap > 0.1E-2) cycle
+    !if (TAB_CONTACTS(i)%type == 1) cycle
+    write(300, '(I2)') 0 !TAB_CONTACTS(i)%status_points
+  end do
   
-!   ! And jump
-!   write(121, '(A)') ' '
+  ! And jump
+  write(300, '(A)') ' '
 
-!   close(121)
+  close(300)
   
   
-!   print*, 'Drawing in vtk       ---> Ok!'
+  print*, 'Drawing in vtk       ---> Ok!'
   
-! end subroutine draw
+end subroutine draw
 
 
 ! !==============================================================================
