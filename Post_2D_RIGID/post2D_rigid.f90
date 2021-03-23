@@ -736,6 +736,29 @@ subroutine read_bodies
         TAB_BODIES(i)%center_ref = curr_center
         TAB_BODIES(i)%ax1 = ax1
         TAB_BODIES(i)%ax2 = ax2
+
+        ! Creating the set of vertices for a wall
+        n_vertex = 4
+        TAB_BODIES(i)%n_vertex = n_vertex
+
+        ! Allocating vertex space
+        if (allocated(vertices)) deallocate(vertices)
+        if (allocated(TAB_BODIES(i)%vertex)) deallocate(TAB_BODIES(i)%vertex)
+        if (allocated(TAB_BODIES(i)%vertex_ref)) deallocate(TAB_BODIES(i)%vertex_ref)
+
+        allocate(vertices(n_vertex,2))
+        allocate(TAB_BODIES(i)%vertex(n_vertex,2))
+        allocate(TAB_BODIES(i)%vertex_ref(n_vertex,2))
+
+        ! Default location of vertices for a wall
+        vertices(1,:) = [-ax1, -ax2]
+        vertices(2,:) = [ ax1, -ax2]
+        vertices(3,:) = [ ax1,  ax2]
+        vertices(4,:) = [-ax1,  ax2]
+        
+        ! Storing
+        TAB_BODIES(i)%vertex_ref = vertices
+
       end if
     end if
   end do
@@ -838,6 +861,16 @@ subroutine update_bodies(i_)
         TAB_BODIES(i)%center_c2(2) = TAB_BODIES(i)%center_ref_c2(1) * sin(rot) + &
                                      TAB_BODIES(i)%center_ref_c2(2) * cos(rot) + &
                                      TAB_BODIES(i)%center(2)
+      end if
+      if (TAB_BODIES(i)%shape == 'wallx') then
+        do j=1,TAB_BODIES(i)%n_vertex
+          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
+                                      TAB_BODIES(i)%center(1)
+          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
+                                      TAB_BODIES(i)%center(2)
+        end do
       end if
     end if
 
@@ -2194,12 +2227,9 @@ subroutine draw(i_, init_, last_)
   
   ! Writing the number of vertices
   n_l_vertices = 0
-  do i=1, n_bodies-n_wall
+  do i=1, n_bodies
     n_l_vertices = n_l_vertices + TAB_BODIES(i)%n_vertex 
   end do
-  
-  ! Adding the vertices of the walls
-  n_l_vertices = n_l_vertices + n_wall*4
   
   write(v_n_vertices, '(I6)') n_l_vertices
   
@@ -2211,95 +2241,47 @@ subroutine draw(i_, init_, last_)
   ! 
   k=0
   do i=1, n_bodies
-    !write(300,*) 'Particle', i
-    if (i .le. n_bodies) then
-      do j=1, TAB_BODIES(i)%n_vertex
-        k = k + 1
-        if(k .lt. 3) then 
-          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-          else
-            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-          end if
-          
-          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-          else 
-            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-          end if
-          
-          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
-          !else 
-          !  write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,3), ' '
-          !end if
+    do j=1, TAB_BODIES(i)%n_vertex
+      k = k + 1
+      if(k .lt. 3) then 
+        if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+          write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
         else
-          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-          else 
-            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-          end if
-          
-          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-          else
-            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-          end if
-          
-          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-            write(300,'(F11.8,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
-          !else 
-          !  write(300,'(F9.7,A)') TAB_BODIES(i)%vertex(j,3), ' '
-          !end if
-          k = 0
+          write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
         end if
-      end do
-    else
-      ! Writing the vertices of the walls
-      do j=1, 4 ! each wall has 4 vertices
-        k = k +1
-        if(k .lt. 3) then 
-          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-          else
-            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-          end if
-          
-          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-          else 
-            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-          end if
-          
-          !if (TAB_BODIES(i)%vertex(3,j) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') 0. ! º1TAB_BODIES(i)%vertex(j,3), ' '
-          !else 
-          !  write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,3), ' '
-          ! end if
+        
+        if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+          write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+        else 
+          write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+        end if
+        
+        !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+        !  write(300,'(F11.8,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+        !else 
+          write(300,'(F9.7,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+        !end if
+      else
+        if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+          write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+        else 
+          write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+        end if
+        
+        if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+          write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
         else
-          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-          else 
-            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-          end if
-          
-          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-            write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-          else 
-            write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-          end if
-          
-          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-            write(300,'(F11.8,A)') 0.0 !TAB_BODIES(i)%vertex(j,3), ' '
-          !else 
-          !  write(300,'(F9.7,A)') TAB_BODIES(i)%vertex(j,3), ' '
-          !end if
-          
-          k = 0
-          
+          write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
         end if
-      end do
-    end if
+        
+        !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+          !write(300,'(F11.8,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+        !else 
+          write(300,'(F9.7,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+        !end if
+        k = 0
+      end if
+    end do
   end do
   
   write(300, '(A)') ' '
@@ -2311,7 +2293,7 @@ subroutine draw(i_, init_, last_)
   
   curr_l_faces = 0
   
-  do i=1, n_bodies-n_wall
+  do i=1, n_bodies
     !write(300,*) 'Particle', i
     ! Write the number of vertices
     write(300, '(I2,A)', advance= 'no') TAB_BODIES(i)%n_vertex, ' '
@@ -2351,71 +2333,6 @@ subroutine draw(i_, init_, last_)
       
     end do
     curr_l_faces = curr_l_faces + TAB_BODIES(i)%n_vertex
-  end do
-  
-  ! Writing the conectivity for the walls
-  ! For all the walls 
-  do i=1, n_wall
-    
-    !!!!! 1st (1-2-3-4)
-    write(300, '(I1,A)', advance= 'no') 4, ' '
-    
-    if (curr_l_faces .lt. 10) then
-      write(300, '(I1)', advance = 'no') curr_l_faces
-    else if (curr_l_faces .lt. 100) then
-      write(300, '(I2)', advance = 'no') curr_l_faces
-    else if (curr_l_faces .lt. 1000) then
-      write(300, '(I3)', advance = 'no') curr_l_faces
-    else if (curr_l_faces .lt. 10000) then
-      write(300, '(I4)', advance = 'no') curr_l_faces
-    else if (curr_l_faces .lt. 100000) then
-      write(300, '(I5)', advance = 'no') curr_l_faces
-    end if
-    
-    write(300, '(A)', advance='no') ' '
-    
-    if (curr_l_faces +1 .lt. 10) then
-      write(300, '(I1)', advance = 'no') curr_l_faces +1 
-    else if (curr_l_faces +1 .lt. 100) then
-      write(300, '(I2)', advance = 'no') curr_l_faces +1 
-    else if (curr_l_faces +1 .lt. 1000) then
-      write(300, '(I3)', advance = 'no') curr_l_faces +1 
-    else if (curr_l_faces +1 .lt. 10000) then
-      write(300, '(I4)', advance = 'no') curr_l_faces +1
-    else if (curr_l_faces +1 .lt. 100000) then
-      write(300, '(I5)', advance = 'no') curr_l_faces +1 
-    end if
-    
-    write(300, '(A)', advance='no') ' '
-    
-    if (curr_l_faces +2 .lt. 10) then
-      write(300, '(I1)', advance = 'no') curr_l_faces +2 
-    else if (curr_l_faces +2 .lt. 100) then
-      write(300, '(I2)', advance = 'no') curr_l_faces +2 
-    else if (curr_l_faces +2 .lt. 1000) then
-      write(300, '(I3)', advance = 'no') curr_l_faces +2 
-    else if (curr_l_faces +2 .lt. 10000) then
-      write(300, '(I4)', advance = 'no') curr_l_faces +2
-    else if (curr_l_faces +2 .lt. 100000) then
-      write(300, '(I5)', advance = 'no') curr_l_faces +2 
-    end if
-    
-    write(300, '(A)', advance='no') ' '
-    
-    if (curr_l_faces +3 .lt. 10) then
-      write(300, '(I1)') curr_l_faces +3
-    else if (curr_l_faces +3 .lt. 100) then
-      write(300, '(I2)') curr_l_faces +3 
-    else if (curr_l_faces +3 .lt. 1000) then
-      write(300, '(I3)') curr_l_faces +3 
-    else if (curr_l_faces +3 .lt. 10000) then
-      write(300, '(I4)') curr_l_faces +3
-    else if (curr_l_faces +3 .lt. 100000) then
-      write(300, '(I5)') curr_l_faces +3
-    end if
-    
-    curr_l_faces = curr_l_faces + 4
-    
   end do
   
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
