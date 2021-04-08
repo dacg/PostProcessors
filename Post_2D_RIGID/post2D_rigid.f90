@@ -62,6 +62,9 @@ real(kind=8)                                ::  time
 real(kind=8)                               ::  box_height, box_width
 real(kind=8)                               ::  box_height_0, box_width_0
 
+! particle size distribution SCarrasco
+!================================================
+real(kind=8),allocatable,dimension(:)      ::  psd
 
 ! Functions list
 !================================================
@@ -69,11 +72,10 @@ character(len=30)                          ::  command
 integer                                    ::  c_coordination=0, c_compacity=0, c_qoverp=0, c_ctc_anisotropy=0, &
                                                c_frc_anisotropy=0, c_brc_anisotropy=0, c_granulo=0, & 
                                                c_walls_pos=0, c_walls_frc = 0, c_contact_dir = 0, c_brc_dir=0, c_frc_dir=0, &
-                                               c_nctc_probability=0, c_frc_list=0, option_cohe=0, c_fail_mode=0,  &
+                                               c_ctc_probability=0, c_frc_list=0, option_cohe=0, c_fail_mode=0,  &
                                                c_list_interact=0, c_sign_aniso=0, c_clean_tresca=0, c_multi_part_frac=0, &
                                                c_avg_shape_ratio=0, c_sign_aniso_l=0, c_list_interact_l = 0, c_ctc_dir_l=0, & 
-                                               c_brc_dir_l=0, c_frc_dir_l=0, c_draw = 0, c_rod_strain=0, c_kin_energy=0, &
-                                               c_second_work=0
+                                               c_brc_dir_l=0, c_frc_dir_l=0, c_draw = 0, c_comp_z = 0, c_coordination_dr=0
 
 ! Flag list
 !================================================
@@ -97,7 +99,7 @@ print*,'-------------------------------------------'
 print*,'!                                         !'
 print*,'!            Post-processing 2D           !'
 print*,'!         from Emilien Azema Code         !'
-print*,'!                 David C                 !'
+print*,'!           David C + Sergio C            !'
 print*,'-------------------------------------------'
 print*,'Flags to be computed: '
 ! Opening the file
@@ -125,7 +127,6 @@ do
       read(command,*) init_frame
       ! Reading the next integer
       read(1,*) last_frame 
-      print*, 'Frames to be analyzed: ', init_frame, ' to ' , last_frame
     end if 
     cycle
   end if
@@ -196,21 +197,15 @@ do
     cycle
   end if
 
-  if (command=='ROD STRAIN                   :') then
-    c_rod_strain=1
-    ! Uses port 201
+  if (command=='COMP Z                       :') then
+    c_comp_z=1
+    ! Uses port 130
     cycle
   end if
 
-  if (command=='KINETIC ENERGY               :') then
-    c_kin_energy=1
-    ! Uses port 202
-    cycle
-  end if
-
-  if (command=='SECOND ORDER WORK            :') then
-    c_second_work=1
-    ! Uses port 203
+  if (command=='COORDINATION FOR SIZE        :') then
+    c_coordination_dr=1
+    ! Uses port 131 and 132
     cycle
   end if
 
@@ -244,11 +239,11 @@ do
   !   ! Uses port 110
   ! end if
   
-  ! if (command=='CONTACT NUMBER PROBABILITY   :') then
-  !   c_n_ctc_probability = 1
-  !   open (unit=111,file='./POSTPRO/CTC_PROBABILITY.DAT',status='replace')
-  !   cycle
-  ! end if
+  if (command=='CONTACT NUMBER PROBABILITY   :') then
+    c_ctc_probability = 1
+    ! Uses port 111
+    cycle
+  end if
 
   ! if (command=='CONTACT FORCES LIST          :') then
   !   c_f_list=1
@@ -285,6 +280,12 @@ do
   !   c_sign_aniso = 1
   !   ! Uses port 117
   !   open (unit=117,file='./POSTPRO/SGN_ANISO.DAT',status='replace')
+  !   cycle
+  ! end if
+
+  ! if (command=='DRAW                         :') then
+  !   c_draw = 1
+  !   ! Uses port 121
   !   cycle
   ! end if
 
@@ -357,7 +358,7 @@ do ii=init_frame, last_frame
   call update_bodies(ii)
 
   ! Computing the size of the box
-  call box_size(ii,init_frame,last_frame)
+  call box_size
 
   ! Reading the contact information
   call read_contacts(ii)
@@ -372,17 +373,16 @@ do ii=init_frame, last_frame
   if (c_brc_anisotropy         == 1)  call brc_anisotropy(ii,init_frame,last_frame)
   if (c_frc_anisotropy         == 1)  call frc_anisotropy(ii,init_frame,last_frame)
   if (c_draw                   == 1)  call draw(ii,init_frame,last_frame)
+  !SC
+  if (c_comp_z                 == 1)  call comp_z(ii,init_frame,last_frame)
+  if (c_ctc_probability        == 1)  call ctc_probability(ii,init_frame,last_frame)
+  if (c_coordination_dr        == 1)  call coordination_dr(ii,init_frame,last_frame)
 
-  if (c_rod_strain             == 1)  call rod_strain(ii,init_frame,last_frame)
-  if (c_kin_energy             == 1)  call kin_energy(ii,init_frame,last_frame)
-  if (c_second_work            == 1)  call second_work(ii,init_frame,last_frame)
-
-!     if (calcul_coordination         == 1)  call nb_coordination
-!     if (calcul_granulo              == 1)  call granulometry
+  
 !     if (contact_dir                 == 1)  call contact_direction
 !     if (calcul_vitesse_moyenne      == 1)  call vitesse_moyenne
 !     if (calcul_persiste_contact     == 1)  call persiste_contact
-!     if (c_n_ctc_probability         == 1)  call ctc_probability
+
 !     if (c_f_list                    == 1)  call f_list
 !     if (c_fail_mode                 == 1)  call failure_mode
 !     if (c_list_interact             == 1)  call list_interact
@@ -457,14 +457,13 @@ end subroutine number_files
 !==============================================================================
 ! Computing the size of the box
 !==============================================================================
-subroutine box_size(i_, init_, last_)
-  
-  implicit none
+subroutine box_size
 
-  integer, intent(in)                      :: i_, init_, last_  
-  integer                                  ::  i, j
-  real(kind=8)                             ::  x_max,y_max
-  real(kind=8)                             ::  x_min,y_min
+  implicit none
+  
+  integer                            ::  i, j
+  real(kind=8)                       ::  x_max,y_max
+  real(kind=8)                       ::  x_min,y_min
  
   x_min =  9999.
   x_max = -9999.
@@ -517,12 +516,6 @@ subroutine box_size(i_, init_, last_)
 
   box_width  = x_max - x_min
   box_height = y_max - y_min
-
-  ! Storing the initial values
-  if (i_ == init_) then
-    box_height_0 = box_height
-    box_width_0 = box_width
-  end if
 
 end subroutine box_size
 
@@ -736,29 +729,6 @@ subroutine read_bodies
         TAB_BODIES(i)%center_ref = curr_center
         TAB_BODIES(i)%ax1 = ax1
         TAB_BODIES(i)%ax2 = ax2
-
-        ! Creating the set of vertices for a wall
-        n_vertex = 4
-        TAB_BODIES(i)%n_vertex = n_vertex
-
-        ! Allocating vertex space
-        if (allocated(vertices)) deallocate(vertices)
-        if (allocated(TAB_BODIES(i)%vertex)) deallocate(TAB_BODIES(i)%vertex)
-        if (allocated(TAB_BODIES(i)%vertex_ref)) deallocate(TAB_BODIES(i)%vertex_ref)
-
-        allocate(vertices(n_vertex,2))
-        allocate(TAB_BODIES(i)%vertex(n_vertex,2))
-        allocate(TAB_BODIES(i)%vertex_ref(n_vertex,2))
-
-        ! Default location of vertices for a wall
-        vertices(1,:) = [-ax1, -ax2]
-        vertices(2,:) = [ ax1, -ax2]
-        vertices(3,:) = [ ax1,  ax2]
-        vertices(4,:) = [-ax1,  ax2]
-        
-        ! Storing
-        TAB_BODIES(i)%vertex_ref = vertices
-
       end if
     end if
   end do
@@ -861,16 +831,6 @@ subroutine update_bodies(i_)
         TAB_BODIES(i)%center_c2(2) = TAB_BODIES(i)%center_ref_c2(1) * sin(rot) + &
                                      TAB_BODIES(i)%center_ref_c2(2) * cos(rot) + &
                                      TAB_BODIES(i)%center(2)
-      end if
-      if (TAB_BODIES(i)%shape == 'wallx') then
-        do j=1,TAB_BODIES(i)%n_vertex
-          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
-                                      TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
-                                      TAB_BODIES(i)%center(1)
-          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
-                                      TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
-                                      TAB_BODIES(i)%center(2)
-        end do
       end if
     end if
 
@@ -1454,6 +1414,82 @@ subroutine compacity(i_, init_, last_)
   
 end subroutine compacity
 
+
+!==============================================================================
+! Computing the solid fraction by z elevation (10 levels)
+!==============================================================================
+subroutine comp_z(i_, init_, last_)
+
+  implicit none
+
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i, j, num_sec
+  real(kind=8)                             :: y_min, v_sec, box_height_sec
+  real(kind=8), dimension(10)              :: v_solid_z
+  real(kind=8), allocatable,dimension(:,:) :: array_wall
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=130,file='./POSTPRO/COMPACITY_Z.DAT',status='replace')
+    write(130,*) '#   time     ','   height    ', '   width    ', '    V_s/V    '
+  end if
+
+  ! numer of sections
+  num_sec = 10
+
+  ! Computing the solid volume of grains
+  v_solid_z(:) = 0.0
+  
+  !Initizialing the y_min
+  y_min = 99999.0
+  
+  ! Allocating an array to contain the info
+  if (allocated(array_wall)) deallocate(array_wall)
+  allocate(array_wall(n_wall,2))
+
+  ! Counter of walls
+  j=0
+  ! We look for wall type of bodies. 
+  do i=1, n_bodies
+    if (TAB_BODIES(i)%shape /= 'wallx') cycle
+    j = j + 1
+    array_wall(j,1) = TAB_BODIES(i)%center(1)
+    array_wall(j,2) = TAB_BODIES(i)%center(2)
+    if  (array_wall(j,2) < y_min) then
+      y_min = array_wall(j,2)
+    end if
+  end do 
+  !!
+  
+  box_height_sec = box_height/num_sec
+
+  do i=1, n_bodies
+    do j=1, num_sec
+      if (TAB_BODIES(i)%center(2) <= y_min + j*box_height_sec .and. y_min + (j-1)*box_height_sec <= TAB_BODIES(i)%center(2))  then
+        v_solid_z(j) = v_solid_z(j) + TAB_BODIES(i)%area
+      end if  
+    end do
+  end do 
+
+  ! Computing the total volume of the box
+  if (flag_periodic == 1) then
+    v_sec = l_periodic*box_height/num_sec
+  else
+    v_sec = box_width/num_sec * box_height
+  end if 
+  
+  ! Writing
+  write(130,'(20(1X,E12.5))') time, box_height/num_sec, box_width, v_solid_z/v_sec
+  
+  if (i_ == last_) then
+    close(130)
+  end if
+
+  ! General info
+  print*, 'Write compacity_z             ---> Ok!'
+  
+  
+end subroutine comp_z
 !==============================================================================
 ! Computing the stress tensor and Q over P
 !==============================================================================
@@ -1470,7 +1506,7 @@ end subroutine compacity
   real(kind=8),dimension(2)                :: wr, wi
   real(kind=8),dimension(2,2)              :: Moment
   real(kind=8),dimension(2,2)              :: localframe
-  !integer, dimension(n_bodies)             :: mi_lista
+  integer, dimension(n_bodies)             :: mi_lista
   
   ! Inializing variables
   Moment(:,:) = 0.0
@@ -1483,16 +1519,16 @@ end subroutine compacity
                                   '   Theta_S   '
   end if
 
-!  mi_lista(:) = 1
-!  do i=1, n_contacts
-!    if (TAB_CONTACTS(i)%nature == 'PLJCx') then
-!      mi_lista(TAB_CONTACTS(i)%cd) = 0
-!    end if
-!    
-!    if (TAB_CONTACTS(i)%nature == 'DKJCx') then
-!      mi_lista(TAB_CONTACTS(i)%cd) = 0
-!    end if
-!  end do
+  mi_lista(:) = 1
+  do i=1, n_contacts
+    if (TAB_CONTACTS(i)%nature == 'PLJCx') then
+      mi_lista(TAB_CONTACTS(i)%cd) = 0
+    end if
+
+    if (TAB_CONTACTS(i)%nature == 'DKJCx') then
+      mi_lista(TAB_CONTACTS(i)%cd) = 0
+    end if
+  end do
 
   ! Building the moment tensor from the contacts
   do i=1, n_contacts
@@ -1510,7 +1546,7 @@ end subroutine compacity
     ! Only active contacts
     if (abs(Rnik) .le. 1.D-8) cycle
 
-    !if (mi_lista(cd) == 0 .or. mi_lista(an)==0) cycle
+    if (mi_lista(cd) == 0 .or. mi_lista(an)==0) cycle
     
     ! Building the branch vector 
     Lik = TAB_BODIES(cd)%center-TAB_BODIES(an)%center
@@ -1583,7 +1619,7 @@ subroutine coordination(i_, init_, last_)
   
   integer, intent(in)                      :: i_, init_, last_
   integer                                  :: i
-  real(kind=8)                             :: z, zc, np
+  real(kind=8)                             :: z, zc, np, c0
   
   ! Initializing variables
   z =0.
@@ -1593,7 +1629,7 @@ subroutine coordination(i_, init_, last_)
   ! If this is the first time, we open the file and write the heading
   if (i_ == init_) then
     open (unit=105,file='./POSTPRO/COORDINATION.DAT',status='replace')
-    write(105,*) '#   time     ','      Z      '
+    write(105,*) '#   time     ','      Z      ','      c0     '
   end if
   
   ! Computing the number of particles in the box other than rattlers
@@ -1603,6 +1639,9 @@ subroutine coordination(i_, init_, last_)
     np = np + 1
   end do
   
+  !Computing proportion of c0 of floating particles
+  c0 = 1- np/n_bodies
+
   ! Computing the effective number of contacts
   do i=1, n_contacts
     ! Only between particles
@@ -1620,7 +1659,7 @@ subroutine coordination(i_, init_, last_)
   z = 2 * zc / np
 
   ! Writing
-  write(105,'(2(1X,E12.5))') time, z
+  write(105,'(3(1X,E12.5))') time, z, c0
 
   if (i_ == last_) then
     close(105)
@@ -1630,6 +1669,115 @@ subroutine coordination(i_, init_, last_)
   print*, 'Write Coordination            ---> Ok!'
   
 end subroutine coordination
+
+
+!==============================================================================
+! Coordination number for dr  - secari
+!==============================================================================
+subroutine coordination_dr(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i, dr, an, cd
+  integer, dimension(size(psd))            :: np
+  real(kind=8)                             :: interval
+  real(kind=8), dimension(size(psd))       :: z, zc, c0, n_c0
+  
+  ! Initializing variables
+  z (:)   =0.
+  zc(:)   =0.
+  np(:)   =0.
+  n_c0(:) =0.
+  c0(:)   =0.
+  
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=131,file='./POSTPRO/COORDINATION_ZDR.DAT',status='replace')
+    write(131,*) '#   time     ','    Z_dr      '
+  end if
+
+  ! calculate the interval of psd 
+  interval = (psd(size(psd))-psd(1))/29
+  
+  ! Computing the number of particles in the box other than rattlers
+  do i=1, n_bodies
+    if (TAB_BODIES(i)%shape == 'wallx' .or. TAB_BODIES(i)%shape == 'pt2dx') cycle
+    if (TAB_BODIES(i)%shape == 'clusx') then 
+      dr = nint((TAB_BODIES(i)%radius_c1-psd(1))/interval +1)
+    else
+      dr = nint((TAB_BODIES(i)%radius-psd(1))/interval +1)
+    end if
+
+    if (TAB_BODIES(i)%n_ctc .lt. 2) then
+      n_c0(dr) = n_c0(dr) + 1 
+    else
+      np(dr) = np(dr) + 1
+    end if
+
+  end do
+
+  ! Computing the effective number of contacts
+  do i=1, n_contacts
+    ! Only between particles
+    if (TAB_CONTACTS(i)%nature == 'PLJCx') cycle 
+    if (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    ! Computing the number of contacts if they are active
+    if (abs(TAB_CONTACTS(i)%rn) .lt. 1e-8) cycle 
+    
+    an = TAB_CONTACTS(i)%an
+    cd = TAB_CONTACTS(i)%cd
+    !antagonist 
+    if (TAB_BODIES(an)%shape == 'clusx') then 
+      dr     = nint((TAB_BODIES(an)%radius_c1-psd(1))/interval + 1)
+      zc(dr) = zc(dr) + 1
+    else
+      dr     = nint((TAB_BODIES(an)%radius-psd(1))/interval + 1)
+      zc(dr) = zc(dr) + 1
+    end if
+    !candidate
+    if (TAB_BODIES(cd)%shape == 'clusx') then 
+      dr     = nint((TAB_BODIES(cd)%radius_c1-psd(1))/interval + 1 )
+      zc(dr) = zc(dr) + 1
+    else
+      dr     = nint((TAB_BODIES(cd)%radius-psd(1))/interval + 1)
+      zc(dr) = zc(dr) + 1
+    end if
+  end do
+  
+  ! The coordination number
+  z  =  zc / np
+  
+  ! The proportion of floationgf particles as a funtion of dr
+  c0 = n_c0/n_bodies
+
+  ! Writing
+  write(131,'(35(1X,E12.5))') time, z
+  
+
+  if (i_ == last_) then
+    close(131)
+  end if
+  
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=132,file='./POSTPRO/COORDINATION_C0DR.DAT',status='replace')
+    write(132,*) '#   time     ','    c0_dr      '
+  end if
+
+  ! Writing
+  write(132,'(35(1X,E12.5))') time, c0
+  
+  if (i_ == last_) then
+    close(132)
+  end if
+
+  ! General info
+  print*, 'Write Coordination_dr         ---> Ok!'
+  
+end subroutine coordination_dr
 
 !==============================================================================
 ! Computing the fabric anisotropy
@@ -1696,7 +1844,7 @@ subroutine ctc_anisotropy(i_, init_, last_)
   end if
   
   ! General info
-  print*, 'Write Anisotropy Conctacts      ---> Ok!'
+  print*, 'Write Anisotropy Conctacts    ---> Ok!'
 end subroutine ctc_anisotropy
 
 !==============================================================================
@@ -1752,11 +1900,12 @@ subroutine brc_anisotropy(i_, init_, last_)
 
     if (flag_periodic==1) then
       ! Correcting the branch orientation and length if necessary
-      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
-        ! This is a peridic case
-        if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
-          Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
-        end if
+      !if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 0.5*(l_periodic)) then
+        ! This is a periodic case
+        !if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+        Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
+        !end if
         ! Y component
         !if (Lik(2) .gt. (max_d_vert_an + max_d_vert_cd)) then
         !Lik(2) = Lik(2) - y_period*(Lik(2)/abs(Lik(2)))
@@ -1809,7 +1958,7 @@ subroutine brc_anisotropy(i_, init_, last_)
   end if
   
   ! General info
-  print*, 'Write Anisotropy Branch          ---> Ok!'
+  print*, 'Write Anisotropy Branch       ---> Ok!'
 
 end subroutine brc_anisotropy
 
@@ -1839,7 +1988,7 @@ subroutine frc_anisotropy(i_, init_, last_)
 
   ! If this is the first time, we open the file and write the heading
   if (i_ == init_) then
-    open (unit=108,file='./POSTPRO/BRC_ANISOTROPY.DAT',status='replace')
+    open (unit=108,file='./POSTPRO/FRC_ANISOTROPY.DAT',status='replace')
     write(108,*) '#   time     ','    a_fn+ac    ','  a_ft+a_fn-2ac    '
   end if
   
@@ -1908,255 +2057,115 @@ subroutine frc_anisotropy(i_, init_, last_)
   end if
   
   ! General info
-  print*, 'Write Anisotropy Force          ---> Ok!'
+  print*, 'Write Anisotropy Force        ---> Ok!'
 
 end subroutine frc_anisotropy
 
-!==============================================================================
-! Grain size distribution
-!==============================================================================
-subroutine granulo
-  
-  implicit none
-  
-  integer                                  :: i, j, bins, sumaInt, c_bin
-  real(kind=8)                             :: rmin, rmax, interval, porcentNum
-  real(kind=8)                             :: areaTotal, porcentArea, area
-  integer, allocatable, dimension(:)       :: freq_tab
-  real(kind=8), dimension(20000)           :: tams
-  
-  ! Opening file
-  open(unit=109,file='./POSTPRO/GRANULO',status='replace')
-  
-  rmin =  9999.
-  rmax = -9999.
-  
-  ! Finding the maximun and minimun radius
-  do i=1, n_bodies
-    ! Only particles
-    if(TAB_BODIES(i)%shape == 'wallx') cycle
-    if(TAB_BODIES(i)%shape == 'pt2dx') cycle
-
-    if (TAB_BODIES(i)%radius<rmin) then
-      rmin = TAB_BODIES(i)%radius
-    end if 
-    if (TAB_BODIES(i)%radius>rmax) then
-      rmax = TAB_BODIES(i)%radius
-    end if
-  end do
-  
-  bins = 32  !here is specified the number of intervals for the distribution
-
-  ! Allocating frequencies table
-  if (allocated(freq_tab)) deallocate(freq_tab)
-  allocate(freq_tab(bins))
-  
-  interval = (rmax - rmin)/bins
-  
-  do i=1, n_bodies
-    !c_bin = XXXX (TAB_BODIES(i)%radius - rmin)/interval XXXXXXX
-    freq_tab(c_bin) = freq_tab(c_bin) + 1
-  end do    
-  
-  sumaInt = 0
-  porcentNum = 0
-  porcentArea = 0
-  area = 0
-  areaTotal = 0 
-  
-  do i=1, n_bodies
-    areaTotal = areaTotal + TAB_BODIES(i)%area
-  enddo
-  
-  !do j = 1, until  
-  !  area = area + (tams(j)**2)*pi*cant(j)
-  !  porcentArea = (area/areaTotal)*100
-  !  
-  !  write(109,'(4(1X,E12.5))') tams(j), porcentArea
-  !enddo
-  
-  close(109)
-  
-  ! General info
-  print*, 'Write Grain size dist     ---> Ok!'
-  
-end subroutine granulo
-
 
 !==============================================================================
-! Computing rod's srains
+! Grain size distribution (Secari)
 !==============================================================================
-subroutine rod_strain(i_, init_, last_)
-
-  implicit none
-
-  integer, intent(in)                      :: i_, init_, last_
-  integer                                  :: i, cd_c, an_c, j
-  real(kind=8)                             :: dx, dy
-
-  ! If this is the first time, we open the file and write the heading
-  if (i_ == init_) then
-    open (unit=201,file='./POSTPRO/ROD_STRAIN.DAT',status='replace')
-    write(201,*) '#   time     ','     cd     ', '     an     ', '    dx    ', '    dy    '
-  end if
-  
-  ! The number of PTPT found
-  j = 0
-
-  write(201,'(1X,E12.5)', advance='no') time
-
-  do i=1,n_contacts_raw
-    if (TAB_CONTACTS_RAW(i)%nature == 'PTPT2') then
-      j=j+1
-      cd_c = TAB_CONTACTS_RAW(i)%cd
-      an_c = TAB_CONTACTS_RAW(i)%an
-      dx = TAB_BODIES(cd_c)%center(1) -  TAB_BODIES(an_c)%center(1)
-      dy = TAB_BODIES(cd_c)%center(2) -  TAB_BODIES(an_c)%center(2)
-
-      if (j < n_ptpt) then
-        write(201,'(1X,I11,1X,I11,1X,E12.5,1X,E12.5)', advance='no') cd_c, an_c, dx, dy
-      else 
-        write(201,'(1X,I11,1X,I11,1X,E12.5,1X,E12.5)') cd_c, an_c, dx, dy
-      end if 
-    end if 
-  end do
-  
-  if (i_ == last_) then
-    close(201)
-  end if
-
-  ! General info
-  print*, 'Write rod strain              ---> Ok!'
-  
-end subroutine rod_strain
-
-!==============================================================================
-! Computing granular kinetic energy
-!==============================================================================
-subroutine kin_energy(i_, init_, last_)
-
-  implicit none
-
-  integer, intent(in)                      :: i_, init_, last_
-  integer                                  :: i
-  real(kind=8)                             :: e_kin_l, e_kin_w, v_norm
-
-  ! If this is the first time, we open the file and write the heading
-  if (i_ == init_) then
-    open (unit=202,file='./POSTPRO/KIN_ENERGY.DAT',status='replace')
-    write(202,*) '#   time     ','    Ek/rho    ','    Ew/rho    '
-  end if
-
-  ! Initializing the kinetic energy
-  e_kin_l = 0.
-  e_kin_w = 0.
-
-  ! Adding energy
-  do i=1,n_bodies
-    if (TAB_BODIES(i)%shape == 'wallx' .or. TAB_BODIES(i)%shape == 'pt2dx') cycle
+  subroutine granulo
     
-    ! The norm of the velocity
-    v_norm = (TAB_BODIES(i)%veloc(1)**2 + TAB_BODIES(i)%veloc(2)**2)**0.5
-    e_kin_l = e_kin_l + (0.5*TAB_BODIES(i)%area*v_norm**2)
-    e_kin_w = e_kin_w + (0.5*TAB_BODIES(i)%area*TAB_BODIES(i)%veloc(3)**2)
-  end do
+    implicit none
+    
+    integer                                  :: i, j, bins, sumaInt, c_bin
+    real(kind=8)                             :: rmin, rmax, interval, porcentNum !rmin is global
+    real(kind=8)                             :: areaTotal, porcentArea, area
+    integer, allocatable, dimension(:)       :: freq_tab
+    real(kind=8), dimension(20000)           :: tams
+    
+    ! Opening file
+    open(unit=109,file='./POSTPRO/GRANULO.DAT',status='replace')
+    
+    rmin =  9999.
+    rmax = -9999.
+    
+    ! Finding the maximun and minimun radius
+    do i=1, n_bodies
+      ! Only particles
+      if(TAB_BODIES(i)%shape == 'wallx') cycle
+      if(TAB_BODIES(i)%shape == 'pt2dx') cycle
+      !cluster 
+      if(TAB_BODIES(i)%shape == 'clusx') then
+        if (TAB_BODIES(i)%radius_c1<rmin) then
+          rmin = TAB_BODIES(i)%radius_c1
+        end if 
+        if (TAB_BODIES(i)%radius_c1>rmax) then
+          rmax = TAB_BODIES(i)%radius_c1
+        end if
+      else
+        if (TAB_BODIES(i)%radius<rmin) then
+          rmin = TAB_BODIES(i)%radius
+        end if 
+        if (TAB_BODIES(i)%radius>rmax) then
+          rmax = TAB_BODIES(i)%radius
+        end if  
+      end if
+    end do
 
-  write(202,'(3(1X,E12.5))') time, e_kin_l, e_kin_w
-  
-  if (i_ == last_) then
-    close(202)
-  end if
+    bins = 29  !here is specified the number of intervals for the distribution
+    
+    ! Allocating frequencies table
+    if (allocated(psd)) deallocate(psd)
+    allocate(psd(bins+1))
+    
+    interval = (rmax - rmin)/bins
+    do i=1, bins+1
+      psd(i) = rmin + (i-1)*interval
+    end do
 
-  ! General info
-  print*, 'Write kinetic energy          ---> Ok!'
-  
-end subroutine kin_energy
+    !write the files 
+    write(109,'(30(1X,E12.5))') psd
+    close(109)
 
-!==============================================================================
-! Computing the second order work
-!==============================================================================
-subroutine second_work(i_, init_, last_)
+    if (allocated(freq_tab)) deallocate(freq_tab)
+    allocate(freq_tab(bins+1))
+    
+    freq_tab(:) = 0
 
-  implicit none
+    
+    do i=1, n_bodies
+      if(TAB_BODIES(i)%shape == 'clusx') then 
+        c_bin           = nint((TAB_BODIES(i)%radius_c1 - rmin)/interval + 1)
+        freq_tab(c_bin) = freq_tab(c_bin) + 1
+      end if
+      if(TAB_BODIES(i)%shape == 'diskx') then 
+        c_bin           = nint((TAB_BODIES(i)%radius    - rmin)/interval + 1)
+        freq_tab(c_bin) = freq_tab(c_bin) + 1
+      end if
+      
+    end do  
 
-  integer, intent(in)                       :: i_, init_, last_
-  integer                                   :: i, j
-  real(kind=8)                              :: sec_work
-  real(kind=8), dimension(2)                :: f_vec, sigma_curr, d_sigma, l_curr, d_u
-  real(kind=8), dimension(:,:), allocatable :: array_wall
-
-  ! If this is the first time, we open the file and write the heading
-  if (i_ == init_) then
-    open (unit=203,file='./POSTPRO/2ND_WORK.DAT',status='replace')
-    write(203,*) '#   time     ','    d2W     '
-  end if
-
-  ! We need to know the forces on the walls to estimate stresses
-  if (allocated(array_wall)) deallocate(array_wall)
-  allocate(array_wall(n_wall,2))
-
-  ! Initializing
-  array_wall(:,:) = 0.0
-
-  ! We look for interactions with walls
-  do i=1, n_contacts
-    if (TAB_CONTACTS(i)%nature == 'DKJCx' .or. TAB_CONTACTS(i)%nature == 'PLJCx') then
-      ! Setting the correct id matching the number of wall
-      j = TAB_CONTACTS(i)%an - (n_bodies - n_wall - n_pt2d)
-
-      ! The force vector
-      f_vec = TAB_CONTACTS(i)%rn*TAB_CONTACTS(i)%n_frame + TAB_CONTACTS(i)%rt*TAB_CONTACTS(i)%t_frame
-
-      array_wall(j,1) = array_wall(j,1) + f_vec(1)
-      array_wall(j,2) = array_wall(j,2) + f_vec(2)
-    end if 
-  end do
-
-  if (i_ == init_) then
-    ! Finding the average stresses. This suposes my starndad wall organization
-    sigma_prev(1) = (array_wall(1,2)+array_wall(2,2))/(2*box_width)
-    sigma_prev(2) = (array_wall(3,2)+array_wall(4,2))/(2*box_height)
-
-    ! The initial state does not move
-    l_prev(1) = box_height
-    l_prev(2) = box_width
-
-  else 
-    sigma_curr(1) = (array_wall(1,2)+array_wall(2,2))/(2*box_width)
-    sigma_curr(2) = (array_wall(3,2)+array_wall(4,2))/(2*box_height)
-
-    d_sigma(1) = sigma_curr(1) - sigma_prev(1)
-    d_sigma(2) = sigma_curr(2) - sigma_prev(2)
-
-    l_curr(1) = box_height
-    l_curr(2) = box_width
-
-    d_u(1) = (l_curr(1) - l_prev(1))/box_height_0!(l_prev(1))
-    d_u(2) = (l_curr(2) - l_prev(2))/box_width_0!(l_prev(2))
-
-    sec_work = (d_sigma(1)*d_u(1)+d_sigma(2)*d_u(2))/((d_sigma(1)**2 + d_sigma(2)**2)**0.5 * (d_u(1)**2 + d_u(2)**2)**0.5)
-
-    ! We print
-    write(203,'(6(1X,E12.5))') time, d_sigma(1), d_sigma(2), d_u(1), d_u(2), sec_work
-
-    ! And update
-    sigma_prev = sigma_curr
-    l_prev = l_curr
-  end if
-
-  if (i_ == last_) then
-    close(203)
-  end if
-
-  ! General info
-  print*, 'Write second order work       ---> Ok!'
-  
-end subroutine second_work
+    !XXXXXX
+    !sumaInt = 0
+    !porcentNum = 0
+    !porcentArea = 0
+    !area = 0
+    !areaTotal = 0 
+    !
+    !do i=1, n_bodies
+    !  areaTotal = areaTotal + TAB_BODIES(i)%area
+    !end do
+    !
+    !do j = 1, until  
+    !  area = area + (tams(j)**2)*pi*cant(j)
+    !  porcentArea = (area/areaTotal)*100
+    !  
+    !  write(109,'(4(1X,E12.5))') tams(j), porcentArea
+    !end do
+    !
+    !close(109)
+    !
+    !! General info
+    !print*, 'Write Grain size dist     ---> Ok!'
+    
+  end subroutine granulo
 
 
-!================================================
-! Drawing in vtk
-!================================================
+! !================================================
+! ! Drawing in vtk
+! !================================================
 subroutine draw(i_, init_, last_)
 
   implicit none
@@ -4200,53 +4209,51 @@ end subroutine draw
 
 ! end subroutine frc_dir_l
 
-! !==============================================================================
-! ! Computing the probability of N number of contacts 
-! !==============================================================================
-! subroutine ctc_probability
+!==============================================================================
+! Computing the probability of N number of contacts 
+!==============================================================================
+subroutine ctc_probability(i_, init_, last_)
+
+  implicit none 
+
+  integer, intent(in)                              :: i_, init_, last_
+  integer                                          :: i, j, temp_counter, ctc_max
+  real (kind=8), allocatable, dimension(:)         :: prob_n_ctc
+
+  !specific a maximun number of contacts
+  ctc_max =  17
+
+  ! Allocating probabilities
+  if (allocated(prob_n_ctc)) deallocate(prob_n_ctc)
+  allocate(prob_n_ctc(ctc_max))
+
+  ! Initializing variables
+  prob_n_ctc(:) = 0
+
+  ! For all the particles
+  do i=1, n_bodies
+    ! Only particles
+    if(TAB_BODIES(i)%shape == 'wallx') cycle
+    if(TAB_BODIES(i)%shape == 'pt2dx') cycle
+
+    temp_counter = TAB_BODIES(i)%n_ctc
+    prob_n_ctc(temp_counter + 1) = prob_n_ctc(temp_counter + 1) + 1
+  end do
+  prob_n_ctc(:) = prob_n_ctc(:)/n_bodies
+
+  !writing 
+  if (i_ == init_) then
+    open (unit=111,file='./POSTPRO/CTC_PROBABILITY.DAT',status='replace')
+    write(111,*) '#   time     ', '    Pc(0)    ', '    Pc(1)    ', '    Pc(2)    ', '    Pc(3)    ', '    Pc(4)    ', &
+                  '    Pc(5)    ', '    Pc(6)    ', '    Pc(7)    ', '    Pc(8)    ', '    Pc(9)    ', '    Pc(10)    ', &
+                  '    Pc(11)    ', '    Pc(12)    ', '    Pc(13)    ', '    Pc(14)    ', '    Pc(15)    ', '    Pc(16)    '
+  end if 
   
-!   implicit none 
-  
-!   integer                                          :: i, j, temp_counter, an, cd
-!   real (kind=8), dimension(20)                     :: prob_n_ctc
-  
-  
-!   ! Initializing variables
-!   prob_n_ctc(:) = 0
-  
-!   ! For all the particles
-!   do i=1, n_particles
-!     temp_counter = 0
-!     ! Going to find this particle in the contact list
-    
-!     do j=1, nb_ligneCONTACT_POLYG
-      
-!       ! For the active contacts
-!       if (TAB_CONTACTS_POLYG(j)%rn .le. 0.D0) cycle
-!       if (TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
-      
-!       cd = TAB_CONTACTS_POLYG(j)%icdent
-!       an = TAB_CONTACTS_POLYG(j)%ianent
-!       if (cd == i .or. an == i) then
-!         temp_counter = temp_counter + 1
-!       end if
-!     end do
-!     prob_n_ctc(temp_counter + 1) = prob_n_ctc(temp_counter + 1) + 1
-!   end do
-  
-!   prob_n_ctc(:) = prob_n_ctc(:)/n_particles
-  
-!   if (first_over_all) then
-!      write(111,*) '#   time     ', '    Pc(0)    ', '    Pc(1)    ', '    Pc(2)    ', '    Pc(3)    ', '    Pc(4)    ', &
-!                   '    Pc(5)    ', '    Pc(6)    ', '    Pc(7)    ', '    Pc(8)    ', '    Pc(9)    ', '    Pc(10)    '
-!   end if 
-  
-!   write(111,'(12(1X,E12.5))') time, prob_n_ctc(1), prob_n_ctc(2), prob_n_ctc(3), prob_n_ctc(4), prob_n_ctc(5), prob_n_ctc(6),&
-!                                    prob_n_ctc(7), prob_n_ctc(8), prob_n_ctc(9), prob_n_ctc(10), prob_n_ctc(11) 
-  
-!   print*, 'Write Contact Number Probability---> Ok!'
-  
-! end subroutine ctc_probability
+  write(111,'(30(1X,E12.5))') time, prob_n_ctc(:)
+
+  print*, 'Write Ctc Number Probability  ---> Ok!'
+
+end subroutine ctc_probability
 
 
 ! !==============================================================================

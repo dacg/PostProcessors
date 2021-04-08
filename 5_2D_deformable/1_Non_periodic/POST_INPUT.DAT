@@ -1,9 +1,0 @@
-##### INPUT DEFORMABLE 2D ####
-INFO SAMPLE                  :
-6                            : Number of walls
-4483                         : Number of rigid particles
-4483                         : Number of deformable particles
-0.4                          : Friction coefficient between particles (For mobilization)
-FORCE BARS SCALE             :
-0.01                         : Force scale parameter (Only compresive forces --> 0.1 works fine)
-END                          :

@@ -1,16 +1,21 @@
 # Functions to be computed:
 FRAMES                       :
-all                          : Options: All. Or the range of frames in two separated lines
-WALLS POSITION               :
-WALLS FORCES                 :
-COMPACITY                    :
-QoverP                       :
+990
+991
+#all                          : Options: All. Or the range of frames in two separated lines
+#WALLS POSITION               :
+#WALLS FORCES                 :
+#COMPACITY                    :
+#QoverP                       :
 PERIODIC                     : 
-1                            : Periodic length
+1604.150808                      : Periodic length
 #COORDINATION                 :
+#COORDINATION FOR SIZE        :
 #CONTACTS ORIENTATION         :
+#COMP Z                       :
 #ANISOTROPY CONTACT           :
+#ANISOTROPY BRANCH            :
 #ANISOTROPY FORCE             :
 #GRAIN SIZE DISTRIB           :
 #CONTACT NUMBER PROBABILITY   :
-#DRAW                         :
+DRAW                         :
