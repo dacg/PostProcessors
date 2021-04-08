@@ -729,6 +729,30 @@ subroutine read_bodies
         TAB_BODIES(i)%center_ref = curr_center
         TAB_BODIES(i)%ax1 = ax1
         TAB_BODIES(i)%ax2 = ax2
+
+        ! Creating the set of vertices for a wall
+        n_vertex = 4
+        TAB_BODIES(i)%n_vertex = n_vertex
+
+        ! Allocating vertex space
+        if (allocated(vertices)) deallocate(vertices)
+        if (allocated(TAB_BODIES(i)%vertex)) deallocate(TAB_BODIES(i)%vertex)
+        if (allocated(TAB_BODIES(i)%vertex_ref)) deallocate(TAB_BODIES(i)%vertex_ref)
+
+        allocate(vertices(n_vertex,2))
+        allocate(TAB_BODIES(i)%vertex(n_vertex,2))
+        allocate(TAB_BODIES(i)%vertex_ref(n_vertex,2))
+
+        ! Default location of vertices for a wall
+        vertices(1,:) = [-ax1, -ax2]
+        vertices(2,:) = [ ax1, -ax2]
+        vertices(3,:) = [ ax1,  ax2]
+        vertices(4,:) = [-ax1,  ax2]
+
+        ! Storing
+        TAB_BODIES(i)%vertex_ref = vertices
+        ! Iniitalizing area of walls to zero!!!!!
+        TAB_BODIES(i)%area = 0
       end if
     end if
   end do
@@ -831,6 +855,17 @@ subroutine update_bodies(i_)
         TAB_BODIES(i)%center_c2(2) = TAB_BODIES(i)%center_ref_c2(1) * sin(rot) + &
                                      TAB_BODIES(i)%center_ref_c2(2) * cos(rot) + &
                                      TAB_BODIES(i)%center(2)
+      end if
+      
+      if (TAB_BODIES(i)%shape == 'wallx') then
+        do j=1,TAB_BODIES(i)%n_vertex
+          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
+                                      TAB_BODIES(i)%center(1)
+          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
+                                      TAB_BODIES(i)%center(2)
+        end do
       end if
     end if
 
