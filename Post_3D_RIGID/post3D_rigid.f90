@@ -1,9 +1,9 @@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!! POST-PROCESSOR !!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!    2D   !!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!    3D   !!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-program post2D_rigid
+program post3D_rigid
 
 implicit none
 
@@ -11,20 +11,21 @@ implicit none
 type  ::  T_BODY
   ! General info for every type of body
   integer                                  ::  id
-  real(kind=8)                             ::  radius, area, rot
-  real(kind=8),dimension(2)                ::  center_ref, center
+  real(kind=8)                             ::  radius, area
+  real(kind=8),dimension(3)                ::  center_ref, center
   real(kind=8),dimension(3)                ::  veloc
-  character(len=5)                         ::  shape ! It can be: 'diskx', 'polyx', 'clusx', 'wallx', 'pt2dx'
+  real(kind=8),dimension(3,3)              ::  rot
+  character(len=5)                         ::  shape ! It can be: 'sphex', 'polyx', 'wallx'
 
   ! Info for polyg or clusters
   integer                                  ::  n_vertex
   real(kind=8)                             ::  radius_c1, radius_c2
-  real(kind=8),dimension(2)                ::  center_ref_c1, center_ref_c2
-  real(kind=8),dimension(2)                ::  center_c1, center_c2
+  real(kind=8),dimension(3)                ::  center_ref_c1, center_ref_c2
+  real(kind=8),dimension(3)                ::  center_c1, center_c2
   real(kind=8),allocatable,dimension(:,:)  ::  vertex, vertex_ref
 
   ! Info for walls
-  real(kind=8)                             ::  ax1, ax2
+  real(kind=8)                             ::  ax1, ax2, ax3
 
   ! Info concerning contacts
   integer                                  ::  n_ctc
@@ -34,9 +35,8 @@ end type T_BODY
 type  ::  T_CONTACT
    integer                                  ::  id, cd, an, cdver, sect, iadj
    integer                                  ::  n_interact, l_ver, l_seg
-   real(kind=8),dimension(2)                ::  n_frame
-   real(kind=8),dimension(2)                ::  t_frame
-   real(kind=8),dimension(2)                ::  coor_ctc
+   real(kind=8),dimension(3)                ::  n_frame, t_frame, s_frame
+   real(kind=8),dimension(3)                ::  coor_ctc
    real(kind=8)                             ::  rn,rt
    real(kind=8)                             ::  vn,vt
    real(kind=8)                             ::  gap0, gap, cd_len, tang_disp
@@ -50,17 +50,17 @@ type(T_CONTACT),allocatable,dimension(:)    ::  TAB_CONTACTS
 !Definitions
 !================================================
 integer                                     ::  n_wall=0, n_bodies=0
-integer                                     ::  n_disk=0, n_polyg=0, n_cluster=0, n_pt2d=0
+integer                                     ::  n_spher=0, n_polyr=0, n_cluster=0, n_pt2d=0
 integer                                     ::  init_frame, last_frame 
-integer                                     ::  n_dkdk=0, n_plpl=0, n_dkjc=0, n_pljc=0, n_dkpl=0, n_ptpt=0
+integer                                     ::  n_spsp=0, n_prpr=0, n_sppl=0, n_prpl=0, n_ptpt=0
 integer                                     ::  n_simple=0,n_double=0, n_contacts=0, n_contacts_raw=0
 integer                                     ::  except, ii
 real(kind=8)                                ::  time
 
 ! Box size
 !================================================
-real(kind=8)                               ::  box_height, box_width
-real(kind=8)                               ::  box_height_0, box_width_0
+real(kind=8)                               ::  box_height, box_width, box_large
+real(kind=8)                               ::  box_height_0, box_width_0, box_large_0
 
 
 ! Functions list
@@ -83,7 +83,7 @@ real(kind=8)                              ::  l_periodic=0
 !Variables DavidC.
 integer, dimension(:), allocatable         ::  t_failure
 integer, dimension(:,:), allocatable       ::  cohe_couples
-real(kind=8), dimension(2)                 ::  l_prev, sigma_prev
+real(kind=8), dimension(3)                 ::  l_prev, sigma_prev
 real(kind=8), dimension(:,:), allocatable  ::  l_forces_c
 
 ! Global parameters
@@ -95,7 +95,7 @@ real(kind=8),parameter                     ::  pi=3.141593D0
 !================================================
 print*,'-------------------------------------------'
 print*,'!                                         !'
-print*,'!            Post-processing 2D           !'
+print*,'!            Post-processing 3D           !'
 print*,'!         from Emilien Azema Code         !'
 print*,'!                 David C                 !'
 print*,'-------------------------------------------'
@@ -463,13 +463,15 @@ subroutine box_size(i_, init_, last_)
 
   integer, intent(in)                      :: i_, init_, last_  
   integer                                  ::  i, j
-  real(kind=8)                             ::  x_max,y_max
-  real(kind=8)                             ::  x_min,y_min
+  real(kind=8)                             ::  x_max,y_max,z_max
+  real(kind=8)                             ::  x_min,y_min,z_min
  
   x_min =  9999.
   x_max = -9999.
   y_min =  9999.
   y_max = -9999.
+  z_min =  9999.
+  z_max = -9999.
 
   do i=1, n_bodies
     ! Omiting walls
@@ -477,11 +479,13 @@ subroutine box_size(i_, init_, last_)
     if (TAB_BODIES(i)%shape == 'pt2dx') cycle
 
     ! In case of disks, we check with the radius
-    if (TAB_BODIES(i)%shape == 'diskx') then
+    if (TAB_BODIES(i)%shape == 'sphex') then
       x_min = min(x_min,TAB_BODIES(i)%center(1) - TAB_BODIES(i)%radius)
       x_max = max(x_max,TAB_BODIES(i)%center(1) + TAB_BODIES(i)%radius)
       y_min = min(y_min,TAB_BODIES(i)%center(2) - TAB_BODIES(i)%radius)
       y_max = max(y_max,TAB_BODIES(i)%center(2) + TAB_BODIES(i)%radius)
+      z_min = min(z_min,TAB_BODIES(i)%center(3) - TAB_BODIES(i)%radius)
+      z_max = max(z_max,TAB_BODIES(i)%center(3) + TAB_BODIES(i)%radius)
     end if
 
     ! In case of clusters
@@ -517,11 +521,13 @@ subroutine box_size(i_, init_, last_)
 
   box_width  = x_max - x_min
   box_height = y_max - y_min
+  box_large  = z_max - z_min
 
   ! Storing the initial values
   if (i_ == init_) then
     box_height_0 = box_height
-    box_width_0 = box_width
+    box_width_0  = box_width
+    box_large_0  = box_large
   end if
 
 end subroutine box_size
@@ -534,9 +540,9 @@ subroutine read_bodies
   implicit none
   
   integer                                  ::  i, j , error, n_vertex
-  real(kind=8)                             ::  radius, ax1, ax2
+  real(kind=8)                             ::  radius, ax1, ax2, ax3
   real(kind=8)                             ::  radius_c1, radius_c2
-  real(kind=8), dimension(2)               ::  curr_center, c_center_c1, c_center_c2
+  real(kind=8), dimension(3)               ::  curr_center, c_center_c1, c_center_c2
   real(kind=8), allocatable,dimension(:,:) ::  vertices
   character(len=20)                        ::  clout_Bodies
   character(len=5)                         ::  text5
@@ -569,16 +575,16 @@ subroutine read_bodies
     ! Looking for keyword
     if (text6 == '$tacty') then
       read(2,'(1X,A5)') text5
-      ! The case this is a disk
-      if (text5 == 'DISKx') then 
+      ! The case this is a sphere
+      if (text5 == 'SPHER') then 
         read(2,'(1X,A5)') text5
         if (text5 == 'PT2Dx') then
           n_pt2d = n_pt2d + 1
         else 
-          n_disk = n_disk + 1
+          n_spher = n_spher + 1
         end if
       ! The this is a polyg or a cluster
-      else if (text5 == 'POLYG') then
+      else if (text5 == 'POLYR') then
         ! We go back one line to RE-read the number of vertex
         backspace(2)
         ! Reading
@@ -591,10 +597,10 @@ subroutine read_bodies
         if (text5 == 'DISKb') then 
           n_cluster = n_cluster + 1
         else 
-          n_polyg = n_polyg + 1
+          n_polyr = n_polyr + 1
         end if
       ! The case this is a wall
-      else if (text5 == 'JONCx') then 
+      else if (text5 == 'PLANx') then 
         n_wall = n_wall + 1
       else 
         print*, 'Unknown body type'
@@ -605,14 +611,14 @@ subroutine read_bodies
   end do
   
   ! General info
-  print*, 'Number of disks:   ', n_disk
-  print*, 'Number of polyg:   ', n_polyg
-  print*, 'Number of cluster: ', n_cluster
-  print*, 'Number of walls:   ', n_wall
-  print*, 'Number of ptpt2:   ', n_pt2d
+  print*, 'Number of spheres:   ', n_spher
+  print*, 'Number of polyr  :   ', n_polyr
+  print*, 'Number of cluster:   ', n_cluster
+  print*, 'Number of walls  :   ', n_wall
+  print*, 'Number of ptpt2  :   ', n_pt2d
 
   ! Defining the total number of particles
-  n_bodies = n_disk + n_polyg + n_cluster + n_wall + n_pt2d
+  n_bodies = n_spher + n_polyr + n_cluster + n_wall + n_pt2d
 
   ! Allocating the tables
   if (allocated(TAB_BODIES)) deallocate(TAB_BODIES)
@@ -639,25 +645,27 @@ subroutine read_bodies
       read(2,*) ! Skippable
       read(2,'(35X,D14.7)') radius
       read(2,*) ! Skippable
-      read(2,'(29X, 2(5x,D14.7,2X))') curr_center(1), curr_center(2)
+      read(2,*) ! Skippable
+      read(2,'(29X, 3(5x,D14.7,2X))') curr_center(1), curr_center(2), curr_center(3)
+      read(2,*) ! Skippable
       read(2,*) ! Skippable
       read(2,'(1X,A5)') text5
 
       ! The case this is a disk
-      if (text5 == 'DISKx') then
+      if (text5 == 'SPHER') then
         read(2,'(1X,A5)') text5
         if (text5 == 'PT2Dx') then
           TAB_BODIES(i)%shape = 'pt2dx'
         else 
-          TAB_BODIES(i)%shape = 'diskx'
+          TAB_BODIES(i)%shape = 'sphex'
         end if
 
         TAB_BODIES(i)%radius = radius
         TAB_BODIES(i)%center_ref = curr_center
-        TAB_BODIES(i)%area = pi*radius**2
+        TAB_BODIES(i)%area = (4.0/3.0)*pi*radius**3
       end if
       ! The this is a polyg or a cluster
-      if (text5 == 'POLYG') then
+      if (text5 == 'POLYR') then
         ! We go back one line to RE-read the number of vertex
         backspace(2)
         ! Reading
@@ -667,13 +675,13 @@ subroutine read_bodies
         if (allocated(TAB_BODIES(i)%vertex)) deallocate(TAB_BODIES(i)%vertex)
         if (allocated(TAB_BODIES(i)%vertex_ref)) deallocate(TAB_BODIES(i)%vertex_ref)
 
-        allocate(vertices(n_vertex,2))
-        allocate(TAB_BODIES(i)%vertex(n_vertex,2))
-        allocate(TAB_BODIES(i)%vertex_ref(n_vertex,2))
+        allocate(vertices(n_vertex,3))
+        allocate(TAB_BODIES(i)%vertex(n_vertex,3))
+        allocate(TAB_BODIES(i)%vertex_ref(n_vertex,3))
 
         ! Reading the vertices
         do j=1, n_vertex
-          read(2,'(29X, 2(5x,D14.7,2X))') vertices(j,1), vertices(j,2)
+          read(2,'(29X, 2(5x,D14.7,2X))') vertices(j,1), vertices(j,2), vertices(j,3)
         end do 
 
         ! Checking if this is a cluster with DISKb
@@ -708,7 +716,7 @@ subroutine read_bodies
           enddo
         else 
           ! Loading the info for a polygon
-          TAB_BODIES(i)%shape = 'polyx'
+          TAB_BODIES(i)%shape = 'polyr'
           TAB_BODIES(i)%radius = radius
           TAB_BODIES(i)%center_ref = curr_center
           TAB_BODIES(i)%vertex_ref = vertices
@@ -725,10 +733,10 @@ subroutine read_bodies
         end if
       end if
       ! The case this is a wall
-      if (text5 == 'JONCx') then 
+      if (text5 == 'PLANx') then 
         ! We go back one line to RE-read the ax1 and ax2
         backspace(2)
-        read(2,'(29X, 2(5x,D14.7,2X))') ax1, ax2
+        read(2,'(29X, 3(5x,D14.7,2X))') ax1, ax2, ax3
 
         ! Loading the info for the wall
         TAB_BODIES(i)%shape = 'wallx'
@@ -736,9 +744,10 @@ subroutine read_bodies
         TAB_BODIES(i)%center_ref = curr_center
         TAB_BODIES(i)%ax1 = ax1
         TAB_BODIES(i)%ax2 = ax2
+        TAB_BODIES(i)%ax3 = ax3
 
         ! Creating the set of vertices for a wall
-        n_vertex = 4
+        n_vertex = 8
         TAB_BODIES(i)%n_vertex = n_vertex
 
         ! Allocating vertex space
@@ -746,15 +755,19 @@ subroutine read_bodies
         if (allocated(TAB_BODIES(i)%vertex)) deallocate(TAB_BODIES(i)%vertex)
         if (allocated(TAB_BODIES(i)%vertex_ref)) deallocate(TAB_BODIES(i)%vertex_ref)
 
-        allocate(vertices(n_vertex,2))
-        allocate(TAB_BODIES(i)%vertex(n_vertex,2))
-        allocate(TAB_BODIES(i)%vertex_ref(n_vertex,2))
+        allocate(vertices(n_vertex,3))
+        allocate(TAB_BODIES(i)%vertex(n_vertex,3))
+        allocate(TAB_BODIES(i)%vertex_ref(n_vertex,3))
 
         ! Default location of vertices for a wall
-        vertices(1,:) = [-ax1, -ax2]
-        vertices(2,:) = [ ax1, -ax2]
-        vertices(3,:) = [ ax1,  ax2]
-        vertices(4,:) = [-ax1,  ax2]
+        vertices(1,:) = [-ax1, -ax2, -ax3]
+        vertices(2,:) = [ ax1, -ax2, -ax3]
+        vertices(3,:) = [ ax1,  ax2, -ax3]
+        vertices(4,:) = [-ax1,  ax2, -ax3]
+        vertices(5,:) = [-ax1, -ax2,  ax3]
+        vertices(6,:) = [ ax1, -ax2,  ax3]
+        vertices(7,:) = [ ax1,  ax2,  ax3]
+        vertices(8,:) = [-ax1,  ax2,  ax3]
         
         ! Storing
         TAB_BODIES(i)%vertex_ref = vertices
@@ -775,9 +788,9 @@ subroutine update_bodies(i_)
 
   integer, intent(in)           :: i_
   integer                       :: i, j, error
-  real(kind=8)                  :: rot
-  real(kind=8),dimension(2)     :: c_center
+  real(kind=8),dimension(3)     :: c_center
   real(kind=8),dimension(3)     :: veloc
+  real(kind=8), dimension(3,3)  :: rot
   character(len=6)              :: text6
   character(len=23)             :: clout_DOF
 
@@ -822,8 +835,13 @@ subroutine update_bodies(i_)
       read(2,*) ! Skippable line
       read(2,*) ! Skippable line
         
-      read(2,'(29X, 3(5x,D14.7,2X))') c_center(1),c_center(2),rot
+      read(2,'(29X, 3(5x,D14.7,2X))') c_center(1),c_center(2),c_center(3)
+      read(2,*) ! Skippable line
       read(2,'(29X, 3(5x,D14.7,2X))') veloc(1),veloc(2),veloc(3)
+      read(2,*) ! Skippable line
+      read(2,'(29X, 3(5x,D14.7,2X))') rot(1,1),rot(1,2),rot(1,3)
+      read(2,'(29X, 3(5x,D14.7,2X))') rot(2,1),rot(2,2),rot(2,3)
+      read(2,'(29X, 3(5x,D14.7,2X))') rot(3,1),rot(3,2),rot(3,3)
 
       ! Appling the relative displacement
       TAB_BODIES(i)%center=TAB_BODIES(i)%center_ref+c_center
@@ -832,46 +850,52 @@ subroutine update_bodies(i_)
       TAB_BODIES(i)%veloc = veloc
       
       ! Applying the relative rotation if this is a polyg or a cluster
-      if (TAB_BODIES(i)%shape == 'polyx') then
-        do j=1,TAB_BODIES(i)%n_vertex
-          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
-                                      TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
-                                      TAB_BODIES(i)%center(1)
-          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
-                                      TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
-                                      TAB_BODIES(i)%center(2)
-        end do
-      end if
-      if (TAB_BODIES(i)%shape == 'clusx') then
-        do j=1,TAB_BODIES(i)%n_vertex
-          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
-                                      TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
-                                      TAB_BODIES(i)%center(1)
-          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
-                                      TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
-                                      TAB_BODIES(i)%center(2)
-        end do
-        TAB_BODIES(i)%center_c1(1) = TAB_BODIES(i)%center_ref_c1(1) * cos(rot) - &
-                                     TAB_BODIES(i)%center_ref_c1(2) * sin(rot) + &
-                                     TAB_BODIES(i)%center(1)
-        TAB_BODIES(i)%center_c1(2) = TAB_BODIES(i)%center_ref_c1(1) * sin(rot) + &
-                                     TAB_BODIES(i)%center_ref_c1(2) * cos(rot) + &
-                                     TAB_BODIES(i)%center(2)
-        TAB_BODIES(i)%center_c2(1) = TAB_BODIES(i)%center_ref_c2(1) * cos(rot) - &
-                                     TAB_BODIES(i)%center_ref_c2(2) * sin(rot) + &
-                                     TAB_BODIES(i)%center(1)
-        TAB_BODIES(i)%center_c2(2) = TAB_BODIES(i)%center_ref_c2(1) * sin(rot) + &
-                                     TAB_BODIES(i)%center_ref_c2(2) * cos(rot) + &
-                                     TAB_BODIES(i)%center(2)
-      end if
+      ! if (TAB_BODIES(i)%shape == 'polyr') then
+      !   do j=1,TAB_BODIES(i)%n_vertex
+      !     TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
+      !                                 TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
+      !                                 TAB_BODIES(i)%center(1)
+      !     TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
+      !                                 TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
+      !                                 TAB_BODIES(i)%center(2)
+      !     TAB_BODIES(i)%vertex(j,3) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
+      !                                 TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
+      !                                 TAB_BODIES(i)%center(3) 
+      !   end do
+      ! end if
+      ! if (TAB_BODIES(i)%shape == 'clusx') then
+      !   do j=1,TAB_BODIES(i)%n_vertex
+      !     TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
+      !                                 TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
+      !                                 TAB_BODIES(i)%center(1)
+      !     TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
+      !                                 TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
+      !                                 TAB_BODIES(i)%center(2)
+      !   end do
+      !   TAB_BODIES(i)%center_c1(1) = TAB_BODIES(i)%center_ref_c1(1) * cos(rot) - &
+      !                                TAB_BODIES(i)%center_ref_c1(2) * sin(rot) + &
+      !                                TAB_BODIES(i)%center(1)
+      !   TAB_BODIES(i)%center_c1(2) = TAB_BODIES(i)%center_ref_c1(1) * sin(rot) + &
+      !                                TAB_BODIES(i)%center_ref_c1(2) * cos(rot) + &
+      !                                TAB_BODIES(i)%center(2)
+      !   TAB_BODIES(i)%center_c2(1) = TAB_BODIES(i)%center_ref_c2(1) * cos(rot) - &
+      !                                TAB_BODIES(i)%center_ref_c2(2) * sin(rot) + &
+      !                                TAB_BODIES(i)%center(1)
+      !   TAB_BODIES(i)%center_c2(2) = TAB_BODIES(i)%center_ref_c2(1) * sin(rot) + &
+      !                                TAB_BODIES(i)%center_ref_c2(2) * cos(rot) + &
+      !                                TAB_BODIES(i)%center(2)
+      ! end if
       if (TAB_BODIES(i)%shape == 'wallx') then
         do j=1,TAB_BODIES(i)%n_vertex
-          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * cos(rot) - &
-                                      TAB_BODIES(i)%vertex_ref(j,2) * sin(rot) + &
+          TAB_BODIES(i)%vertex(j,1) = TAB_BODIES(i)%vertex_ref(j,1) * rot(1,1) - &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * rot(1,1) + &
                                       TAB_BODIES(i)%center(1)
-          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * sin(rot) + &
-                                      TAB_BODIES(i)%vertex_ref(j,2) * cos(rot) + &
+          TAB_BODIES(i)%vertex(j,2) = TAB_BODIES(i)%vertex_ref(j,1) * rot(1,1) + &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * rot(1,1) + &
                                       TAB_BODIES(i)%center(2)
+          TAB_BODIES(i)%vertex(j,3) = TAB_BODIES(i)%vertex_ref(j,1) * rot(1,1) + &
+                                      TAB_BODIES(i)%vertex_ref(j,2) * rot(1,1) + &
+                                      TAB_BODIES(i)%center(3)
         end do
       end if
     end if
@@ -891,7 +915,7 @@ subroutine read_contacts(i_)
   integer, intent(in)           ::  i_
   integer                       ::  i, j, error, cd , an, id, l_ver, iadj, l_seg
   real(kind=8)                  ::  rn, rt, gap, rn_temp, rt_temp, gap_temp
-  real(kind=8),dimension(2)     ::  coor_ctc, veloc_ctc, n_frame, coor_ctc_temp
+  real(kind=8),dimension(3)     ::  coor_ctc, veloc_ctc, n_frame, t_frame, s_frame, coor_ctc_temp
   character(len=5)              ::  status, i_law, text5
   character(len=6)              ::  text6
   character(len=13)             ::  text13
@@ -915,11 +939,10 @@ subroutine read_contacts(i_)
   end if
 
   ! Initialization of counters
-  n_dkdk = 0
-  n_plpl = 0
-  n_dkpl = 0
-  n_dkjc = 0
-  n_pljc = 0
+  n_spsp = 0
+  n_prpr = 0
+  n_sppl = 0
+  n_prpl = 0
   n_ptpt = 0
 
   ! Reading the Vloc_Rloc.OUT.i_
@@ -948,23 +971,21 @@ subroutine read_contacts(i_)
     end if
 
     ! Identifying the type of contact
-    if (text13 == '$icdan  DKDKx') then
-      n_dkdk = n_dkdk + 1
-    else if (text13 == '$icdan  DKJCx') then
-      n_dkjc = n_dkjc + 1
-    else if (text13 == '$icdan  PLPLx') then
-      n_plpl = n_plpl + 1
-    else if (text13 == '$icdan  PLJCx') then
-      n_pljc = n_pljc + 1
-    else if (text13 == '$icdan  DKPLx') then
-      n_dkpl = n_dkpl + 1
+    if (text13 == '$icdan  SPSPx') then
+      n_spsp = n_spsp + 1
+    else if (text13 == '$icdan  SPPLx') then
+      n_sppl = n_sppl + 1
+    else if (text13 == '$icdan  PRPRx') then
+      n_prpr = n_prpr + 1
+    else if (text13 == '$icdan  PRPLx') then
+      n_prpl = n_prpl + 1
     else if (text13 == '$icdan  PTPT2') then
       n_ptpt = n_ptpt + 1
     end if
   end do
 
   ! Total number of raw contacts
-  n_contacts_raw = n_dkdk + n_plpl + n_dkpl + n_dkjc + n_pljc + n_ptpt
+  n_contacts_raw = n_spsp + n_sppl + n_prpr + n_prpl + n_ptpt
 
   ! Genaral information
   print*, 'Total number of raw interactions:', n_contacts_raw
@@ -1002,8 +1023,8 @@ subroutine read_contacts(i_)
       read(2,'(8X,A5,2X,i7)') text5, id
       read(2,*) ! Skippable line
 
-      if (text5 == 'DKDKx' .or. text5 == 'DKJCx') then
-        read(2,'(8X,i5,16X,A5,9x,i5,16X,A5,2X,i5)')             cd, i_law, an, status, iadj
+      if (text5 == 'SPSPx' .or. text5 == 'SPPLx') then
+        read(2,'(8X,i5,23X,A5,9x,i5,16X,A5,2X,i5)')             cd, i_law, an, status, iadj
       else if (text5 == 'PLPLx') then
         read(2,'(8X,i5,23X,i5,2X,A5,9X,i5,23X,i5,2X,A5,2X,i5)') cd, l_ver, i_law, an, l_seg, status, iadj
       else if (text5 == 'PLJCx') then
@@ -1021,7 +1042,9 @@ subroutine read_contacts(i_)
       read(2,'(29X, 2(5x,D14.7,2X))') rt,rn
       read(2,'(29X, 2(5x,D14.7,2X))') veloc_ctc(2), veloc_ctc(1)
       read(2,'(29X, 1(5x,D14.7,2X))') gap
-      read(2,'(29X, 2(5x,D14.7,2X))') n_frame(1), n_frame(2)
+      read(2,'(29X, 3(5x,D14.7,2X))') s_frame(1), s_frame(2), s_frame(3)
+      read(2,'(29X, 3(5x,D14.7,2X))') t_frame(1), t_frame(2), t_frame(3)
+      read(2,'(29X, 3(5x,D14.7,2X))') n_frame(1), n_frame(2), n_frame(3)
       read(2,'(29X, 2(5x,D14.7,2X))') coor_ctc(1), coor_ctc(2)
 
       TAB_CONTACTS_RAW(i)%id = id
@@ -1360,7 +1383,7 @@ subroutine walls_frc(i_, init_, last_)
 
   integer, intent(in)                      :: i_, init_, last_
   integer                                  :: i, j
-  real(kind=8), dimension(2)               :: f_vec
+  real(kind=8), dimension(3)               :: f_vec
   character, dimension(1)                  :: id_wall=' '
   real(kind=8), allocatable,dimension(:,:) :: array_wall
 
@@ -1427,7 +1450,7 @@ subroutine compacity(i_, init_, last_)
   ! If this is the first time, we open the file and write the heading
   if (i_ == init_) then
     open (unit=103,file='./POSTPRO/COMPACITY.DAT',status='replace')
-    write(103,*) '#   time     ','   height    ', '   width    ', '    V_s/V    '
+    write(103,*) '#   time     ','   height    ', '   width    ', '    large    ', '    V_s/V    '
   end if
 
   ! Computing the solid volume of grains
@@ -1441,11 +1464,11 @@ subroutine compacity(i_, init_, last_)
   if (flag_periodic == 1) then
     v_total = l_periodic*box_height
   else
-    v_total = box_width * box_height
+    v_total = box_width * box_height * box_large
   end if 
   
   ! Writing
-  write(103,'(6(1X,E12.5))') time, box_height, box_width, v_solid/v_total
+  write(103,'(6(1X,E12.5))') time, box_height, box_width, box_large, v_solid/v_total
   
   if (i_ == last_) then
     close(103)
@@ -1468,10 +1491,10 @@ end subroutine compacity
   integer                                  :: ierror, matz, lda
   real(kind=8)                             :: Rtik, Rnik
   real(kind=8)                             :: S1, S2, theta_s
-  real(kind=8),dimension(2)                :: nik, tik, Lik, Fik
-  real(kind=8),dimension(2)                :: wr, wi
-  real(kind=8),dimension(2,2)              :: Moment
-  real(kind=8),dimension(2,2)              :: localframe
+  real(kind=8),dimension(3)                :: nik, tik, Lik, Fik
+  real(kind=8),dimension(3)                :: wr, wi
+  real(kind=8),dimension(3,3)              :: Moment
+  real(kind=8),dimension(3,3)              :: localframe
   !integer, dimension(n_bodies)             :: mi_lista
   
   ! Inializing variables
@@ -1608,8 +1631,8 @@ subroutine coordination(i_, init_, last_)
   ! Computing the effective number of contacts
   do i=1, n_contacts
     ! Only between particles
-    if (TAB_CONTACTS(i)%nature == 'PLJCx') cycle 
-    if (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if (TAB_CONTACTS(i)%nature == 'PRPLx') cycle 
+    if (TAB_CONTACTS(i)%nature == 'SPPLx') cycle
     if (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
 
     ! Computing the number of contacts if they are active
@@ -1643,11 +1666,11 @@ subroutine ctc_anisotropy(i_, init_, last_)
   integer, intent(in)                      :: i_, init_, last_
   integer                                  :: i, cd, an
   integer                                  :: ierror, matz, lda
-  real(kind=8),dimension(2)                :: nik, Lik
-  real(kind=8),dimension(2,2)              :: Fabric
-  real(kind=8),dimension(2)                :: wr,wi
+  real(kind=8),dimension(3)                :: nik, Lik
+  real(kind=8),dimension(3,3)              :: Fabric
+  real(kind=8),dimension(3)                :: wr,wi
   real(kind=8)                             :: S1, S2, cpt, Rnik
-  real(kind=8),dimension(2,2)              :: localframe
+  real(kind=8),dimension(3,3)              :: localframe
   
   ! Initializing 
   cpt = 0
@@ -1712,10 +1735,10 @@ subroutine brc_anisotropy(i_, init_, last_)
   integer                                  :: i,cd,an
   integer                                  :: ierror,matz,lda
   real(kind=8)                             :: X1n,X2n, X1f,X2f,cpt,av_length, Lnik, Ltik, Rnik
-  real(kind=8), dimension(2)               :: nik,tik, Lik
-  real(kind=8), dimension(2)               :: wrn, win, wrf, wif
-  real(kind=8), dimension(2,2)             :: Fabric_N,Fabric_T, Fabric_F
-  real(kind=8), dimension(2,2)             :: localframeN, localframeF
+  real(kind=8), dimension(3)               :: nik,tik, Lik
+  real(kind=8), dimension(3)               :: wrn, win, wrf, wif
+  real(kind=8), dimension(3,3)             :: Fabric_N,Fabric_T, Fabric_F
+  real(kind=8), dimension(3,3)             :: localframeN, localframeF
   
   ! Initializing variables
   Fabric_N(:,:) = 0.
@@ -1826,10 +1849,10 @@ subroutine frc_anisotropy(i_, init_, last_)
   integer                                  :: i,cd,an
   integer                                  :: ierror,matz,lda
   real(kind=8)                             :: X1n,X2n, X1f,X2f,cpt,Rtik,Rnik,av_force
-  real(kind=8), dimension(2)               :: nik,tik, Fik
-  real(kind=8), dimension(2)               :: wrn, win, wrf, wif
-  real(kind=8), dimension(2,2)             :: Fabric_N,Fabric_T, Fabric_F
-  real(kind=8), dimension(2,2)             :: localframeN, localframeF
+  real(kind=8), dimension(3)               :: nik,tik, Fik
+  real(kind=8), dimension(3)               :: wrn, win, wrf, wif
+  real(kind=8), dimension(3,3)             :: Fabric_N,Fabric_T, Fabric_F
+  real(kind=8), dimension(3,3)             :: localframeN, localframeF
   
   ! Initializing variables
   Fabric_N(:,:) = 0.
@@ -2084,7 +2107,7 @@ subroutine second_work(i_, init_, last_)
   integer, intent(in)                       :: i_, init_, last_
   integer                                   :: i, j
   real(kind=8)                              :: sec_work
-  real(kind=8), dimension(2)                :: f_vec, sigma_curr, d_sigma, l_curr, d_u
+  real(kind=8), dimension(3)                :: f_vec, sigma_curr, d_sigma, l_curr, d_u
   real(kind=8), dimension(:,:), allocatable :: array_wall
 
   ! If this is the first time, we open the file and write the heading
@@ -2404,12 +2427,12 @@ subroutine draw(i_, init_, last_)
     ! For the particles
     if (i .le. n_bodies-n_wall) then
       curr_l_vector(1:2) = TAB_BODIES(i)%center(1:2) - TAB_BODIES(i)%center_ref(1:2)
-      curr_l_vector(3) = TAB_BODIES(i)%rot
+      !curr_l_vector(3) = TAB_BODIES(i)%rot
       write(300, '(3(F12.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
     else
     !For the walls 
       curr_l_vector(1:2) = TAB_BODIES(i)%center(1:2) - TAB_BODIES(i)%center_ref(1:2)
-      curr_l_vector(3) = TAB_BODIES(i)%rot
+      !curr_l_vector(3) = TAB_BODIES(i)%rot
       write(300, '(3(F12.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
     end if
   end do
@@ -5470,4 +5493,4 @@ end subroutine draw
 !===========================================================================
 !That's all folks!
 !===========================================================================
-end program post2D_rigid
+end program post3D_rigid
