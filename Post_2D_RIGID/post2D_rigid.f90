@@ -2169,11 +2169,12 @@ subroutine draw(i_, init_, last_)
   character(:), allocatable                      ::  vtk_n_points
   logical                                        ::  dir_vtk
   character(len=6)                               ::  vtk_c_temp,  v_n_vertices
-  integer                                        ::  i, j, k
+  integer                                        ::  i, j, k, l
   integer                                        ::  n_l_vertices, curr_l_faces
   integer                                        ::  n_l_fields, l_counter
   real(kind=8), dimension(3)                     ::  curr_l_vector
-  integer                                        ::  l_cdt, l_ant
+  integer                                        ::  l_cdt, l_ant, res_disk
+  real(kind=8), dimension(:,:), allocatable      ::  vertices_curr, vertices_curr_1, vertices_curr_2
   
   ! Variables for the forces
   character(:), allocatable                      ::  vtk_forces
@@ -2226,13 +2227,22 @@ subroutine draw(i_, init_, last_)
   write(300,'(A,I6)') 'RIGID ', i_
   write(300,'(A)') 'ASCII'
   write(300,'(A)') 'DATASET POLYDATA'
+
+  ! This is the resolution of circular bodies for drawing
+  res_disk = 10
   
   ! Writing the number of vertices
   n_l_vertices = 0
   do i=1, n_bodies
-    n_l_vertices = n_l_vertices + TAB_BODIES(i)%n_vertex 
+    if (TAB_BODIES(i)%shape == 'polyx' .or. TAB_BODIES(i)%shape == 'wallx') then
+      n_l_vertices = n_l_vertices + TAB_BODIES(i)%n_vertex 
+    else if (TAB_BODIES(i)%shape == 'diskx') then
+      n_l_vertices = n_l_vertices + res_disk
+    else if (TAB_BODIES(i)%shape == 'clusx') then
+      n_l_vertices = n_l_vertices + 2*res_disk + TAB_BODIES(i)%n_vertex
+    end if 
   end do
-  
+
   write(v_n_vertices, '(I6)') n_l_vertices
   
   vtk_n_points = 'POINTS ' // v_n_vertices // ' float'
@@ -2243,47 +2253,227 @@ subroutine draw(i_, init_, last_)
   ! 
   k=0
   do i=1, n_bodies
-    do j=1, TAB_BODIES(i)%n_vertex
-      k = k + 1
-      if(k .lt. 3) then 
-        if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-          write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+    print*, i, TAB_BODIES(i)%shape
+    if (TAB_BODIES(i)%shape=='polyx' .or. TAB_BODIES(i)%shape=='wallx') then
+      do j=1, TAB_BODIES(i)%n_vertex
+        k = k + 1
+        if(k .lt. 3) then 
+          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          else
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          end if
+          
+          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          else 
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+          !  write(300,'(F12.6,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+            write(300,'(F12.6,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
         else
-          write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          else 
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          end if
+          
+          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          else
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+            !write(300,'(F12.6,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+            write(300,'(F12.6,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
+          k = 0
         end if
-        
-        if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-          write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-        else 
-          write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
-        end if
-        
-        !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-        !  write(300,'(F11.8,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
-        !else 
-          write(300,'(F9.7,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
-        !end if
-      else
-        if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-          write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-        else 
-          write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
-        end if
-        
-        if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-          write(300,'(F11.8,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+      end do
+    else if (TAB_BODIES(i)%shape=='diskx') then
+      ! Allocating memory fo 
+      if (allocated(vertices_curr)) deallocate(vertices_curr)
+      allocate(vertices_curr(res_disk,2))
+      ! Unitary vertices after resolution
+      do l = 1, res_disk
+        vertices_curr(l,1) = cos((2*pi/res_disk)*l)
+        vertices_curr(l,2) = sin((2*pi/res_disk)*l)
+      end do
+      ! Scaling by radius
+      vertices_curr = vertices_curr*TAB_BODIES(i)%radius
+      ! Translating circle to real position of body
+      vertices_curr(:,1) = vertices_curr(:,1) + TAB_BODIES(i)%center(1)
+      vertices_curr(:,2) = vertices_curr(:,2) + TAB_BODIES(i)%center(2)
+
+      ! Writing the vertices 
+      do j=1, res_disk
+        k = k + 1
+        if(k .lt. 3) then 
+          if (vertices_curr(j,1) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+          else
+            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+          end if
+          
+          if (vertices_curr(j,2) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+          else 
+            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+          !  write(300,'(F12.6,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+            write(300,'(F12.6,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
         else
-          write(300,'(F9.7,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          if (vertices_curr(j,1) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+          else 
+            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+          end if
+          
+          if (vertices_curr(j,2) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+          else
+            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+            !write(300,'(F12.6,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+            write(300,'(F12.6,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
+          k = 0
         end if
-        
-        !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-          !write(300,'(F11.8,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
-        !else 
-          write(300,'(F9.7,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
-        !end if
-        k = 0
-      end if
-    end do
+      end do
+    else if (TAB_BODIES(i)%shape=='clusx') then
+      ! Allocating memory fo 
+      if (allocated(vertices_curr_1)) deallocate(vertices_curr_1)
+      allocate(vertices_curr_1(res_disk,2))
+      if (allocated(vertices_curr_2)) deallocate(vertices_curr_2)
+      allocate(vertices_curr_2(res_disk,2))
+
+      ! Unitary vertices after resolution
+      do l = 1, res_disk
+        vertices_curr_1(l,1) = cos((2*pi/res_disk)*l)
+        vertices_curr_1(l,2) = sin((2*pi/res_disk)*l)
+      end do
+      vertices_curr_2 = vertices_curr_1
+
+      ! Scaling by radius
+      vertices_curr_1 = vertices_curr_1*TAB_BODIES(i)%radius_c1
+      vertices_curr_2 = vertices_curr_2*TAB_BODIES(i)%radius_c2
+
+      ! Translating circle to real position of body
+      vertices_curr_1(:,1) = vertices_curr_1(:,1) + TAB_BODIES(i)%center_c1(1)
+      vertices_curr_1(:,2) = vertices_curr_1(:,2) + TAB_BODIES(i)%center_c1(2)
+
+      vertices_curr_2(:,1) = vertices_curr_2(:,1) + TAB_BODIES(i)%center_c2(1)
+      vertices_curr_2(:,2) = vertices_curr_2(:,2) + TAB_BODIES(i)%center_c2(2)
+
+      ! Writing the vertices of the polygon part
+      do j=1, TAB_BODIES(i)%n_vertex
+        k = k + 1
+        if(k .lt. 3) then 
+          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          else
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          end if
+          
+          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          else 
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+          !  write(300,'(F12.6,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+            write(300,'(F12.6,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
+        else
+          if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          else 
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+          end if
+          
+          if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          else
+            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+          end if
+          
+          !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+            !write(300,'(F12.6,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+          !else 
+            write(300,'(F12.6,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+          !end if
+          k = 0
+        end if
+      end do
+
+      ! Writing the vertices of the two circles
+      if (allocated(vertices_curr)) deallocate(vertices_curr)
+      allocate(vertices_curr(res_disk,2))
+
+      do l=1, 2
+        if (l==1) then
+          vertices_curr = vertices_curr_1
+        else 
+          vertices_curr = vertices_curr_2
+        end if
+        do j=1, res_disk
+          k = k + 1
+          if(k .lt. 3) then 
+            if (vertices_curr(j,1) .lt. 0) then
+              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+            else
+              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+            end if
+            
+            if (vertices_curr(j,2) .lt. 0) then
+              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+            else 
+              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+            end if
+            
+            !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+            !  write(300,'(F12.6,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+            !else 
+              write(300,'(F12.6,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+            !end if
+          else
+            if (vertices_curr(j,1) .lt. 0) then
+              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+            else 
+              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+            end if
+            
+            if (vertices_curr(j,2) .lt. 0) then
+              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+            else
+              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+            end if
+            
+            !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
+              !write(300,'(F12.6,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+            !else 
+              write(300,'(F12.6,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+            !end if
+            k = 0
+          end if
+        end do
+      end do
+    end if
   end do
   
   write(300, '(A)') ' '
@@ -2291,50 +2481,178 @@ subroutine draw(i_, init_, last_)
   ! Writing the conectivity between vertices
   ! Plus 4 walls
   write(300,'(A)', advance='no') 'POLYGONS '
-  write(300, '(2(I6,A))') n_bodies, ' ' , (n_l_vertices + n_bodies)
+  write(300, '(2(I6,A))') n_bodies+2*n_cluster, ' ' , (n_l_vertices + n_bodies+2*n_cluster)
   
   curr_l_faces = 0
   
   do i=1, n_bodies
     !write(300,*) 'Particle', i
     ! Write the number of vertices
-    write(300, '(I2,A)', advance= 'no') TAB_BODIES(i)%n_vertex, ' '
+    if (TAB_BODIES(i)%shape == 'polyx' .or. TAB_BODIES(i)%shape=='wallx') then
+      write(300, '(I2,A)', advance= 'no') TAB_BODIES(i)%n_vertex, ' '
+    else if(TAB_BODIES(i)%shape == 'diskx') then
+      write(300, '(I2,A)', advance= 'no') res_disk, ' '
+    else if(TAB_BODIES(i)%shape == 'clusx') then
+      !write(300, '(I2,A)', advance= 'no') TAB_BODIES(i)%n_vertex, ' '
+      ! The connectivity is written below
+    end if
     
     ! Write its consecutive conectivity
-    do j=1, TAB_BODIES(i)%n_vertex
-      
-      ! ... writing precisely 
-      if (j .lt. TAB_BODIES(i)%n_vertex) then
-        if (curr_l_faces - 1 + j .lt. 10) then
-          write(300, '(I1)', advance = 'no') curr_l_faces - 1 + j
-        else if (curr_l_faces - 1 + j .lt. 100) then
-          write(300, '(I2)', advance = 'no') curr_l_faces - 1 + j
-        else if (curr_l_faces - 1 + j .lt. 1000) then
-          write(300, '(I3)', advance = 'no') curr_l_faces - 1 + j
-        else if (curr_l_faces - 1 + j .lt. 10000) then
-          write(300, '(I4)', advance = 'no') curr_l_faces - 1 + j
-        else if (curr_l_faces - 1 + j .lt. 100000) then
-          write(300, '(I5)', advance = 'no') curr_l_faces - 1 + j
+    if (TAB_BODIES(i)%shape == 'polyx' .or. TAB_BODIES(i)%shape == 'wallx') then
+      do j=1, TAB_BODIES(i)%n_vertex
+        ! ... writing precisely 
+        if (j .lt. TAB_BODIES(i)%n_vertex) then
+          if (curr_l_faces - 1 + j .lt. 10) then
+            write(300, '(I1)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100) then
+            write(300, '(I2)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000) then
+            write(300, '(I3)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 10000) then
+            write(300, '(I4)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100000) then
+            write(300, '(I5)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000000) then
+            write(300, '(I6)', advance = 'no') curr_l_faces - 1 + j
+          end if
+          write(300, '(A)', advance='no') ' '
+          
+        else
+          if (curr_l_faces - 1 + j .lt. 10) then
+            write(300, '(I1)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100) then
+            write(300, '(I2)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000) then
+            write(300, '(I3)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 10000) then
+            write(300, '(I4)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100000) then
+            write(300, '(I5)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000000) then
+            write(300, '(I6)') curr_l_faces - 1 + j
+          end if
         end if
-        
-        write(300, '(A)', advance='no') ' '
-        
-      else
-        if (curr_l_faces - 1 + j .lt. 10) then
-          write(300, '(I1)') curr_l_faces - 1 + j
-        else if (curr_l_faces - 1 + j .lt. 100) then
-          write(300, '(I2)') curr_l_faces - 1 + j
-        else if (curr_l_faces - 1 + j .lt. 1000) then
-          write(300, '(I3)') curr_l_faces - 1 + j
-        else if (curr_l_faces - 1 + j .lt. 10000) then
-          write(300, '(I4)') curr_l_faces - 1 + j
-        else if (curr_l_faces - 1 + j .lt. 100000) then
-          write(300, '(I5)') curr_l_faces - 1 + j
+      end do
+      curr_l_faces = curr_l_faces + TAB_BODIES(i)%n_vertex
+    else if (TAB_BODIES(i)%shape == 'diskx') then 
+      do j=1, res_disk
+        ! ... writing precisely 
+        if (j .lt. res_disk) then
+          if (curr_l_faces - 1 + j .lt. 10) then
+            write(300, '(I1)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100) then
+            write(300, '(I2)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000) then
+            write(300, '(I3)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 10000) then
+            write(300, '(I4)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100000) then
+            write(300, '(I5)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000000) then
+            write(300, '(I6)', advance = 'no') curr_l_faces - 1 + j
+          end if
+          
+          write(300, '(A)', advance='no') ' '
+          
+        else
+          if (curr_l_faces - 1 + j .lt. 10) then
+            write(300, '(I1)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100) then
+            write(300, '(I2)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000) then
+            write(300, '(I3)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 10000) then
+            write(300, '(I4)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100000) then
+            write(300, '(I5)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000000) then
+            write(300, '(I6)') curr_l_faces - 1 + j
+          end if
+          
         end if
-      end if
-      
-    end do
-    curr_l_faces = curr_l_faces + TAB_BODIES(i)%n_vertex
+        curr_l_faces = curr_l_faces + res_disk
+      end do
+    else if(TAB_BODIES(i)%shape == 'clusx') then
+      ! First we write infor for the rectangle
+      write(300, '(I2,A)', advance= 'no') TAB_BODIES(i)%n_vertex, ' '
+      do j=1, TAB_BODIES(i)%n_vertex
+        if (j .lt. TAB_BODIES(i)%n_vertex) then
+          if (curr_l_faces - 1 + j .lt. 10) then
+            write(300, '(I1)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100) then
+            write(300, '(I2)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000) then
+            write(300, '(I3)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 10000) then
+            write(300, '(I4)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100000) then
+            write(300, '(I5)', advance = 'no') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000000) then
+            write(300, '(I6)', advance = 'no') curr_l_faces - 1 + j
+          end if
+          
+          write(300, '(A)', advance='no') ' '
+          
+        else
+          if (curr_l_faces - 1 + j .lt. 10) then
+            write(300, '(I1)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100) then
+            write(300, '(I2)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000) then
+            write(300, '(I3)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 10000) then
+            write(300, '(I4)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 100000) then
+            write(300, '(I5)') curr_l_faces - 1 + j
+          else if (curr_l_faces - 1 + j .lt. 1000000) then
+            write(300, '(I6)') curr_l_faces - 1 + j
+          end if
+          
+        end if
+      end do
+      curr_l_faces = curr_l_faces + TAB_BODIES(i)%n_vertex
+      ! This is for the circles
+      do l = 1, 2
+        write(300, '(I2,A)', advance= 'no') res_disk, ' '
+        do j=1, res_disk
+          ! ... writing precisely 
+          if (j .lt. res_disk) then
+            if (curr_l_faces - 1 + j .lt. 10) then
+              write(300, '(I1)', advance = 'no') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 100) then
+              write(300, '(I2)', advance = 'no') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 1000) then
+              write(300, '(I3)', advance = 'no') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 10000) then
+              write(300, '(I4)', advance = 'no') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 100000) then
+              write(300, '(I5)', advance = 'no') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 1000000) then
+              write(300, '(I6)', advance = 'no') curr_l_faces - 1 + j
+            end if
+            
+            write(300, '(A)', advance='no') ' '
+            
+          else
+            if (curr_l_faces - 1 + j .lt. 10) then
+              write(300, '(I1)') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 100) then
+              write(300, '(I2)') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 1000) then
+              write(300, '(I3)') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 10000) then
+              write(300, '(I4)') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 100000) then
+              write(300, '(I5)') curr_l_faces - 1 + j
+            else if (curr_l_faces - 1 + j .lt. 1000000) then
+              write(300, '(I6)') curr_l_faces - 1 + j
+            end if
+            
+          end if
+        end do
+        curr_l_faces = curr_l_faces + res_disk
+      end do
+    end if 
   end do
   
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2352,7 +2670,7 @@ subroutine draw(i_, init_, last_)
   write(300,'(A)', advance='no') 'CELL_DATA'
   
   ! Writing the number of data by field. It corresponds to the same number of particles
-  write(300, '(2(I6,A))') n_bodies
+  write(300, '(2(I6,A))') n_bodies + n_cluster*2
   write(300, '(A,I4)')  'FIELD FieldData', n_l_fields
   
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2360,14 +2678,19 @@ subroutine draw(i_, init_, last_)
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
   ! Naming the field, the dimension of the data, and number of lines (as before FIELD), and data type
-  write(300,'(A,I1,I6,A)') 'Id ', 1, (n_bodies), ' float'
+  write(300,'(A,I1,I6,A)') 'Id ', 1, (n_bodies+n_cluster*2), ' float'
   k = 0
   l_counter = 0
   do i=1, n_bodies
-    l_counter = l_counter + 1
-    
-    write(300, '(I6)') l_counter
-    
+    if (TAB_BODIES(i)%shape=='clusx') then
+      l_counter = l_counter + 1
+      write(300, '(I6)') l_counter
+      write(300, '(I6)') l_counter
+      write(300, '(I6)') l_counter
+    else 
+      l_counter = l_counter + 1
+      write(300, '(I6)') l_counter
+    end if
   end do
   ! And jump
   !write(300, '(A)') ' '
@@ -2375,18 +2698,21 @@ subroutine draw(i_, init_, last_)
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Material
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  write(300,'(A,I1,I6,A)') 'Material ', 1, (n_bodies), ' float'
+  write(300,'(A,I1,I6,A)') 'Material ', 1, (n_bodies+2*n_cluster), ' float'
   k = 0
-  l_counter = 1
   
   do i=1, n_bodies
-    if (i .le. n_bodies-n_wall) then
+    if (TAB_BODIES(i)%shape == 'diskx') then
       ! Material number 1
-      write(300, '(I6)') l_counter
-    else
-      l_counter = 2
-      
-      write(300, '(I6)') l_counter
+      write(300, '(I6)') 1
+    else if (TAB_BODIES(i)%shape == 'polyx') then
+      write(300, '(I6)') 2
+    else if (TAB_BODIES(i)%shape == 'clusx') then
+      write(300, '(I6)') 3
+      write(300, '(I6)') 3
+      write(300, '(I6)') 3
+    else if (TAB_BODIES(i)%shape == 'wallx') then
+      write(300, '(I6)') 4
     end if
   end do
   
@@ -2398,19 +2724,20 @@ subroutine draw(i_, init_, last_)
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   curr_l_vector(:) = 0.D0
   
-  write(300,'(A,I1,I6,A)') 'Disp ', 3, (n_bodies), ' float'
+  write(300,'(A,I1,I6,A)') 'Disp ', 3, (n_bodies+n_cluster*2), ' float'
   k = 0
   do i=1, n_bodies
     ! For the particles
-    if (i .le. n_bodies-n_wall) then
+    if (TAB_BODIES(i)%shape == 'clusx' ) then
       curr_l_vector(1:2) = TAB_BODIES(i)%center(1:2) - TAB_BODIES(i)%center_ref(1:2)
       curr_l_vector(3) = TAB_BODIES(i)%rot
-      write(300, '(3(F12.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
-    else
-    !For the walls 
+      write(300, '(3(F12.5,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+      write(300, '(3(F12.5,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+      write(300, '(3(F12.5,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+    else 
       curr_l_vector(1:2) = TAB_BODIES(i)%center(1:2) - TAB_BODIES(i)%center_ref(1:2)
       curr_l_vector(3) = TAB_BODIES(i)%rot
-      write(300, '(3(F12.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+      write(300, '(3(F12.5,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
     end if
   end do
   
@@ -2422,21 +2749,23 @@ subroutine draw(i_, init_, last_)
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   curr_l_vector(:) = 0.D0
   
-  write(300,'(A,I1,I6,A)') 'Veloc ', 3, (n_bodies), ' float'
+  write(300,'(A,I1,I6,A)') 'Veloc ', 3, (n_bodies+n_cluster*2), ' float'
   k = 0
   do i=1, n_bodies
-    if (i .le. n_bodies-n_wall) then
+    if (TAB_BODIES(i)%shape == 'clusx') then
       curr_l_vector(1) = TAB_BODIES(i)%veloc(1)
       curr_l_vector(2) = TAB_BODIES(i)%veloc(2)
       curr_l_vector(3) = TAB_BODIES(i)%veloc(3)
       
-      write(300, '(3(F13.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+      write(300, '(3(F12.5,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+      write(300, '(3(F12.5,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+      write(300, '(3(F12.5,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
     else
       curr_l_vector(1) = TAB_BODIES(i)%veloc(1)
       curr_l_vector(2) = TAB_BODIES(i)%veloc(2)
       curr_l_vector(3) = TAB_BODIES(i)%veloc(3)
       
-      write(300, '(3(F13.9,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
+      write(300, '(3(F12.5,A))') curr_l_vector(1), ' ', curr_l_vector(2), ' ', curr_l_vector(3)
     end if
   end do
   
@@ -2448,37 +2777,47 @@ subroutine draw(i_, init_, last_)
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   l_counter = 0
   
-  write(300,'(A,I1,I6,A)') 'Z ', 1, (n_bodies), ' float'
+  write(300,'(A,I1,I6,A)') 'Z ', 1, (n_bodies+n_cluster*2), ' float'
   k = 0
   do i=1, n_bodies
     l_counter = 0
-    if (i .le. n_bodies - n_wall) then
+    if (TAB_BODIES(i)%shape == 'clusx') then
       ! Counting the number of contacts      
       write(300, '(I4,A)') TAB_BODIES(i)%n_ctc
+      write(300, '(I4,A)') TAB_BODIES(i)%n_ctc
+      write(300, '(I4,A)') TAB_BODIES(i)%n_ctc
       
-    else
+    else if (TAB_BODIES(i)%shape == 'wallx') then
       write(300, '(I4,A)') 0
+    else 
+      write(300, '(I4,A)') TAB_BODIES(i)%n_ctc
     end if
   end do
   
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Float
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  l_counter = 0
   
-  write(300,'(A,I1,I6,A)') 'Float_stat ', 1, (n_bodies), ' float'
+  write(300,'(A,I1,I6,A)') 'Float_stat ', 1, (n_bodies+2*n_cluster), ' float'
   k = 0
   do i=1, n_bodies
-    l_counter = 0
-    if (i .le. n_bodies-n_wall) then
+    if (TAB_BODIES(i)%shape=='clusx') then
       !
+      if (TAB_BODIES(i)%n_ctc .lt. 2) then
+        write(300, '(I4,A)') 0
+        write(300, '(I4,A)') 0
+        write(300, '(I4,A)') 0
+      else 
+        write(300, '(I4,A)') 1
+        write(300, '(I4,A)') 1
+        write(300, '(I4,A)') 1
+      end if
+    else
       if (TAB_BODIES(i)%n_ctc .lt. 2) then
         write(300, '(I4,A)') 0
       else 
         write(300, '(I4,A)') 1
       end if
-    else
-      write(300, '(I4,A)') -1
     end if
   end do
   
