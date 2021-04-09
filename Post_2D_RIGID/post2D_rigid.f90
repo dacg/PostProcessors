@@ -2229,7 +2229,7 @@ subroutine draw(i_, init_, last_)
   write(300,'(A)') 'DATASET POLYDATA'
 
   ! This is the resolution of circular bodies for drawing
-  res_disk = 10
+  res_disk = 12
   
   ! Writing the number of vertices
   n_l_vertices = 0
@@ -2253,45 +2253,45 @@ subroutine draw(i_, init_, last_)
   ! 
   k=0
   do i=1, n_bodies
-    print*, i, TAB_BODIES(i)%shape
+    !print*, i, TAB_BODIES(i)%shape
     if (TAB_BODIES(i)%shape=='polyx' .or. TAB_BODIES(i)%shape=='wallx') then
       do j=1, TAB_BODIES(i)%n_vertex
         k = k + 1
         if(k .lt. 3) then 
           if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
           else
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
           end if
           
           if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
           else 
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
           end if
           
           !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-          !  write(300,'(F12.6,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+          !  write(300,'(E12.5,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
           !else 
-            write(300,'(F12.6,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+            write(300,'(E12.5,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
           !end if
         else
           if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
           else 
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
           end if
           
           if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
           else
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
           end if
           
           !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-            !write(300,'(F12.6,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+            !write(300,'(E12.5,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
           !else 
-            write(300,'(F12.6,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+            write(300,'(E12.5,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
           !end if
           k = 0
         end if
@@ -2316,39 +2316,39 @@ subroutine draw(i_, init_, last_)
         k = k + 1
         if(k .lt. 3) then 
           if (vertices_curr(j,1) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,1), ' '
           else
-            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,1), ' '
           end if
           
           if (vertices_curr(j,2) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,2), ' '
           else 
-            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,2), ' '
           end if
           
           !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-          !  write(300,'(F12.6,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+          !  write(300,'(E12.5,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
           !else 
-            write(300,'(F12.6,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+            write(300,'(E12.5,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
           !end if
         else
           if (vertices_curr(j,1) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,1), ' '
           else 
-            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,1), ' '
           end if
           
           if (vertices_curr(j,2) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,2), ' '
           else
-            write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,2), ' '
           end if
           
           !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-            !write(300,'(F12.6,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+            !write(300,'(E12.5,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
           !else 
-            write(300,'(F12.6,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+            write(300,'(E12.5,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
           !end if
           k = 0
         end if
@@ -2383,39 +2383,39 @@ subroutine draw(i_, init_, last_)
         k = k + 1
         if(k .lt. 3) then 
           if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
           else
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
           end if
           
           if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
           else 
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
           end if
           
           !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-          !  write(300,'(F12.6,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+          !  write(300,'(E12.5,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
           !else 
-            write(300,'(F12.6,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+            write(300,'(E12.5,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
           !end if
         else
           if (TAB_BODIES(i)%vertex(j,1) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
           else 
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,1), ' '
           end if
           
           if (TAB_BODIES(i)%vertex(j,2) .lt. 0) then
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
           else
-            write(300,'(F12.6,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
+            write(300,'(E12.5,A)', advance = 'no') TAB_BODIES(i)%vertex(j,2), ' '
           end if
           
           !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-            !write(300,'(F12.6,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+            !write(300,'(E12.5,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
           !else 
-            write(300,'(F12.6,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+            write(300,'(E12.5,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
           !end if
           k = 0
         end if
@@ -2425,7 +2425,7 @@ subroutine draw(i_, init_, last_)
       if (allocated(vertices_curr)) deallocate(vertices_curr)
       allocate(vertices_curr(res_disk,2))
 
-      do l=1, 2
+      do l = 1, 2
         if (l==1) then
           vertices_curr = vertices_curr_1
         else 
@@ -2435,39 +2435,39 @@ subroutine draw(i_, init_, last_)
           k = k + 1
           if(k .lt. 3) then 
             if (vertices_curr(j,1) .lt. 0) then
-              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+              write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,1), ' '
             else
-              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+              write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,1), ' '
             end if
             
             if (vertices_curr(j,2) .lt. 0) then
-              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+              write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,2), ' '
             else 
-              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+              write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,2), ' '
             end if
             
             !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-            !  write(300,'(F12.6,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
+            !  write(300,'(E12.5,A)', advance = 'no') 0. !TAB_BODIES(i)%vertex(j,3), ' '
             !else 
-              write(300,'(F12.6,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
+              write(300,'(E12.5,A)', advance = 'no') 0., ' ' ! TAB_BODIES(i)%vertex(j,3), ' '
             !end if
           else
             if (vertices_curr(j,1) .lt. 0) then
-              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+              write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,1), ' '
             else 
-              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,1), ' '
+              write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,1), ' '
             end if
             
             if (vertices_curr(j,2) .lt. 0) then
-              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+              write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,2), ' '
             else
-              write(300,'(F12.6,A)', advance = 'no') vertices_curr(j,2), ' '
+              write(300,'(E12.5,A)', advance = 'no') vertices_curr(j,2), ' '
             end if
             
             !if (TAB_BODIES(i)%vertex(j,3) .lt. 0) then
-              !write(300,'(F12.6,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
+              !write(300,'(E12.5,A)') 0.0 ! TAB_BODIES(i)%vertex(j,3), ' '
             !else 
-              write(300,'(F12.6,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
+              write(300,'(E12.5,A)') 0.0, ' ' !TAB_BODIES(i)%vertex(j,3), ' '
             !end if
             k = 0
           end if
@@ -2570,8 +2570,8 @@ subroutine draw(i_, init_, last_)
           end if
           
         end if
-        curr_l_faces = curr_l_faces + res_disk
       end do
+      curr_l_faces = curr_l_faces + res_disk
     else if(TAB_BODIES(i)%shape == 'clusx') then
       ! First we write infor for the rectangle
       write(300, '(I2,A)', advance= 'no') TAB_BODIES(i)%n_vertex, ' '
