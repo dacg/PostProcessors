@@ -37,7 +37,7 @@ type  ::  T_CONTACT
    integer                                  ::  n_interact, l_ver, l_seg
    real(kind=8),dimension(3)                ::  n_frame, t_frame, s_frame
    real(kind=8),dimension(3)                ::  coor_ctc
-   real(kind=8)                             ::  rn,rt
+   real(kind=8)                             ::  rn,rt,rs
    real(kind=8)                             ::  vn,vt
    real(kind=8)                             ::  gap0, gap, cd_len, tang_disp
    character(len=5)                         ::  nature, status, i_law
@@ -914,7 +914,7 @@ subroutine read_contacts(i_)
   
   integer, intent(in)           ::  i_
   integer                       ::  i, j, error, cd , an, id, l_ver, iadj, l_seg
-  real(kind=8)                  ::  rn, rt, gap, rn_temp, rt_temp, gap_temp
+  real(kind=8)                  ::  rn, rt, rs, gap, rn_temp, rt_temp, gap_temp
   real(kind=8),dimension(3)     ::  coor_ctc, veloc_ctc, n_frame, t_frame, s_frame, coor_ctc_temp
   character(len=5)              ::  status, i_law, text5
   character(len=6)              ::  text6
@@ -1039,7 +1039,7 @@ subroutine read_contacts(i_)
         stop
       end if 
 
-      read(2,'(29X, 2(5x,D14.7,2X))') rt,rn
+      read(2,'(29X, 3(5x,D14.7,2X))') rs,rt,rn
       read(2,'(29X, 2(5x,D14.7,2X))') veloc_ctc(2), veloc_ctc(1)
       read(2,'(29X, 1(5x,D14.7,2X))') gap
       read(2,'(29X, 3(5x,D14.7,2X))') s_frame(1), s_frame(2), s_frame(3)
@@ -1055,6 +1055,7 @@ subroutine read_contacts(i_)
       TAB_CONTACTS_RAW(i)%t_frame(2) = -n_frame(1)
       TAB_CONTACTS_RAW(i)%coor_ctc=coor_ctc
       TAB_CONTACTS_RAW(i)%rn=rn
+      TAB_CONTACTS_RAW(i)%rs=rs
       TAB_CONTACTS_RAW(i)%rt=rt
       TAB_CONTACTS_RAW(i)%n_interact = 0
       TAB_CONTACTS_RAW(i)%i_law = i_law
@@ -1116,6 +1117,7 @@ subroutine read_contacts(i_)
         TAB_CONTACTS(j)%t_frame    = TAB_CONTACTS_RAW(i)%t_frame
         TAB_CONTACTS(j)%coor_ctc   = TAB_CONTACTS_RAW(i)%coor_ctc
         TAB_CONTACTS(j)%rn         = TAB_CONTACTS_RAW(i)%rn
+        TAB_CONTACTS(j)%rs         = TAB_CONTACTS_RAW(i)%rs
         TAB_CONTACTS(j)%rt         = TAB_CONTACTS_RAW(i)%rt
         TAB_CONTACTS(j)%nature     = TAB_CONTACTS_RAW(i)%nature
         TAB_CONTACTS(j)%n_interact = 1
@@ -1489,9 +1491,9 @@ end subroutine compacity
   integer, intent(in)                      :: i_, init_, last_
   integer                                  :: i, cd, an
   integer                                  :: ierror, matz, lda
-  real(kind=8)                             :: Rtik, Rnik
-  real(kind=8)                             :: S1, S2, theta_s
-  real(kind=8),dimension(3)                :: nik, tik, Lik, Fik
+  real(kind=8)                             :: Rtik, Rnik, Rsik
+  real(kind=8)                             :: S1, S2, S3
+  real(kind=8),dimension(3)                :: nik, tik, sik, Lik, Fik
   real(kind=8),dimension(3)                :: wr, wi
   real(kind=8),dimension(3,3)              :: Moment
   real(kind=8),dimension(3,3)              :: localframe
@@ -1503,9 +1505,11 @@ end subroutine compacity
   ! If this is the first time, we open the file and write the heading
   if (i_ == init_) then
     open (unit=104,file='./POSTPRO/QOVERP.DAT',status='replace')
-    write(104,*) '#   time     ', '     s11     ', '     s12     ', '     s22     ', &
-                                  '      S1     ', '      S2     ', '     Q/P     ', &
-                                  '   Theta_S   '
+    write(104,*) '#   time     ', '     s11     ', '     s12     ', '     s13     ', &
+                                  '     s21     ', '     s22     ', '     s13     ', &
+                                  '     s31     ', '     s32     ', '     s33     ', &
+                                  '      S1     ', '      S2     ', '      S2     ', &
+                                  '     Q/P     '
   end if
 
 !  mi_lista(:) = 1
@@ -1529,8 +1533,10 @@ end subroutine compacity
     an      = TAB_CONTACTS(i)%an
     nik     = TAB_CONTACTS(i)%n_frame
     tik     = TAB_CONTACTS(i)%t_frame
+    sik     = TAB_CONTACTS(i)%s_frame
     Rnik    = TAB_CONTACTS(i)%rn
     Rtik    = TAB_CONTACTS(i)%rt
+    Rsik    = TAB_CONTACTS(i)%rs
     
     ! Only active contacts
     if (abs(Rnik) .le. 1.D-8) cycle
@@ -1555,40 +1561,56 @@ end subroutine compacity
     end if 
 
     ! Building the force vector
-    Fik = Rnik*nik+Rtik*tik
+    Fik = Rnik*nik+Rtik*tik+Rsik*sik
     
     ! The tensor
-    Moment(1,1:2) = Moment(1,1:2) + Fik(1)*Lik(1:2)
-    Moment(2,1:2) = Moment(2,1:2) + Fik(2)*Lik(1:2)
+    Moment(1,1:3) = Moment(1,1:3) + Fik(1)*Lik(1:3)
+    Moment(2,1:3) = Moment(2,1:3) + Fik(2)*Lik(1:3)
+    Moment(3,1:3) = Moment(3,1:3) + Fik(3)*Lik(1:3)
   end do
   
   ! Changing to stresses
   if (flag_periodic == 1) then
     Moment = Moment / (box_height*l_periodic)
   else
-    Moment = Moment / (box_height*box_width)
+    Moment = Moment / (box_height*box_width*box_large)
   end if
 
   ! Writing the stress tensor
-  write(104,'(4(1X,E12.5))', advance='no') time, Moment(1,1), Moment(1,2), Moment(2,2)
+  write(104,'(10(1X,E12.5))', advance='no') time, Moment(1,1), Moment(1,2), Moment(2,3), &
+                                                 Moment(2,1), Moment(2,2), Moment(2,3), &
+                                                 Moment(3,1), Moment(3,2), Moment(3,3)
 
   ! Computing the eigenvalues and eigenvectors of the tensor
   ! This uses a general subroutine that calls for variables:
-  lda  = 2
+  lda  = 3
   matz = 1
   
   ! The subroutine
-  call rg(lda, 2, Moment, wr, wi, matz, localframe, ierror)
-  S1 = max(wr(1),wr(2))
-  S2 = min(wr(1),wr(2))
+  call rg(lda, 3, Moment, wr, wi, matz, localframe, ierror)
 
-  ! Computing the orientation of the stress tensor 
-  theta_s = abs(0.5*atan2(-2*Moment(1,2),(Moment(1,1)-Moment(2,2))))
-
-  theta_s = theta_s*180/pi
+  if ( wr(1)==wr(2) .and. (wr(2)==wr(3)) ) then
+    S1=wr(1)
+    S2=S1
+    S3=S1
+  else
+    S3 = max( wr(1),max(wr(2),wr(3)))
+    S1 = min( wr(1),min(wr(2),wr(3)))
+    if (wr(1)==wr(2)) then
+      if (S1==wr(1)) S2=S1
+      if (S3==wr(1)) S2=S3
+    else if (wr(3)==wr(2)) then
+      if (S1==wr(2)) S2=S1
+      if (S3==wr(3)) S2=S3
+    else
+      do i=1,3
+        if ((wr(i)<S3) .and. (wr(i)>S1)) S2=wr(i)
+      end do
+    end if
+  end if
 
   ! Writing
-  write(104,'(4(1X,E12.5))') S1,S2,(S1-S2)/(S1+S2), theta_s
+  write(104,'(4(1X,E12.5))') S1,S2,S3,(S3-S1)/(S1+S2+S3)
   
   if (i_ == last_) then
     close(104)
@@ -1640,6 +1662,8 @@ subroutine coordination(i_, init_, last_)
 
     zc = zc + 1
   end do
+
+  print*, zc, np
   
   ! The coordination number
   z = 2 * zc / np

@@ -28,6 +28,9 @@ type  ::  T_BODY
 
   ! Info concerning contacts
   integer                                  ::  n_ctc
+
+  ! For cohesive cases
+  integer                                  ::  group
 end type T_BODY
 
 
@@ -60,6 +63,7 @@ real(kind=8)                                ::  time
 ! Box size
 !================================================
 real(kind=8)                               ::  box_height, box_width
+real(kind=8)                               ::  x_max, y_max, x_min, y_min
 real(kind=8)                               ::  box_height_0, box_width_0
 
 
@@ -68,12 +72,13 @@ real(kind=8)                               ::  box_height_0, box_width_0
 character(len=30)                          ::  command
 integer                                    ::  c_coordination=0, c_compacity=0, c_qoverp=0, c_ctc_anisotropy=0, &
                                                c_frc_anisotropy=0, c_brc_anisotropy=0, c_granulo=0, & 
-                                               c_walls_pos=0, c_walls_frc = 0, c_contact_dir = 0, c_brc_dir=0, c_frc_dir=0, &
+                                               c_walls_pos=0, c_walls_frc = 0, c_ctc_ori = 0, c_brc_ori=0, c_frc_ori=0, &
                                                c_nctc_probability=0, c_frc_list=0, option_cohe=0, c_fail_mode=0,  &
                                                c_list_interact=0, c_sign_aniso=0, c_clean_tresca=0, c_multi_part_frac=0, &
                                                c_avg_shape_ratio=0, c_sign_aniso_l=0, c_list_interact_l = 0, c_ctc_dir_l=0, & 
                                                c_brc_dir_l=0, c_frc_dir_l=0, c_draw = 0, c_rod_strain=0, c_kin_energy=0, &
-                                               c_second_work=0
+                                               c_second_work=0, c_list_radius=0, c_list_perimeter=0, c_pore_dist=0, &
+                                               c_set_groups=0, c_pore_size=0
 
 ! Flag list
 !================================================
@@ -196,6 +201,42 @@ do
     cycle
   end if
 
+  if (command=='FORCE LIST                   :') then
+    c_frc_list=1
+    cycle
+    ! Uses port 110
+  end if
+
+  if (command=='PORE SIZE DISTRIBUTION       :') then
+    c_pore_dist=1
+    cycle
+    ! Uses port 111
+  end if
+
+  if (command=='PORE SIZE DISTRIBUTION 2     :') then
+    c_pore_size=1
+    cycle
+    ! Uses port 112
+  end if
+
+  if (command=='CONTACT ORIENTATION          :') then
+    c_ctc_ori = 1
+    cycle
+    ! Uses port 113
+  end if
+
+  if (command=='BRANCH ORIENTATION           :') then
+    c_brc_ori = 1
+    ! Uses port 114
+    cycle
+  end if
+
+  if (command=='FORCES ORIENTATION           :') then
+    c_frc_ori = 1
+    ! Uses port 115
+    cycle
+  end if
+
   if (command=='ROD STRAIN                   :') then
     c_rod_strain=1
     ! Uses port 201
@@ -214,9 +255,27 @@ do
     cycle
   end if
 
+  if (command=='LIST RADIUS                  :') then
+    c_list_radius=1
+    ! Uses port 204
+    cycle
+  end if
+
+  if (command=='LIST PERIMETER               :') then
+    c_list_perimeter=1
+    ! Uses port 205
+    cycle
+  end if
+
   if (command=='DRAW                         :') then
     c_draw = 1
     ! Uses port 300
+    cycle
+  end if
+
+  if (command=='SET GROUP                    :') then
+    c_set_groups = 1
+    ! Does not use ports
     cycle
   end if
   
@@ -238,22 +297,10 @@ do
   !   cycle
   ! end if
   
-  ! if (command=='CONTACTS ORIENTATION         :') then
-  !   contact_dir=1
-  !   cycle
-  !   ! Uses port 110
-  ! end if
-  
   ! if (command=='CONTACT NUMBER PROBABILITY   :') then
   !   c_n_ctc_probability = 1
   !   open (unit=111,file='./POSTPRO/CTC_PROBABILITY.DAT',status='replace')
   !   cycle
-  ! end if
-
-  ! if (command=='CONTACT FORCES LIST          :') then
-  !   c_f_list=1
-  !   cycle
-  !   ! Uses port 112
   ! end if
 
   ! if (command=='FAILURE MODE                 :') then
@@ -266,18 +313,6 @@ do
   ! if (command=='LIST INTERACTIONS            :') then
   !   c_list_interact=1
   !   ! Uses port 114
-  !   cycle
-  ! end if
-
-  ! if (command=='BRANCH DISTRIBUTION          :') then
-  !   c_brc_dir = 1
-  !   ! Uses port 115
-  !   cycle
-  ! end if
-
-  ! if (command=='FORCES DISTRIBUTION          :') then
-  !   c_frc_dir = 1
-  !   ! Uses port 116
   !   cycle
   ! end if
 
@@ -342,10 +377,6 @@ end do
 ! Initializing bodies
 call read_bodies
 
-! One time subroutines
-!======================
-if (c_granulo         == 1)  call granulo
-
 ! Analysing the frames
 !======================
 do ii=init_frame, last_frame
@@ -362,7 +393,20 @@ do ii=init_frame, last_frame
   ! Reading the contact information
   call read_contacts(ii)
 
-  ! Calling subroutines
+  !======================
+  ! One time subroutines
+  !======================
+  if (ii==init_frame) then
+    if (c_granulo         == 1)  call granulo
+    if (c_list_radius     == 1)  call list_radius
+    if (c_list_perimeter  == 1)  call list_perimeter
+    if (c_pore_dist       == 1)  call pore_dist
+    if (c_pore_size       == 1)  call pore_size
+  end if
+
+  !======================
+  ! Historic subroutines
+  !======================
   if (c_walls_pos              == 1)  call walls_pos(ii,init_frame,last_frame)
   if (c_walls_frc              == 1)  call walls_frc(ii,init_frame,last_frame)
   if (c_compacity              == 1)  call compacity(ii,init_frame,last_frame)
@@ -372,23 +416,22 @@ do ii=init_frame, last_frame
   if (c_brc_anisotropy         == 1)  call brc_anisotropy(ii,init_frame,last_frame)
   if (c_frc_anisotropy         == 1)  call frc_anisotropy(ii,init_frame,last_frame)
   if (c_draw                   == 1)  call draw(ii,init_frame,last_frame)
+  if (c_frc_list               == 1)  call frc_list(ii,init_frame,last_frame)
+  if (c_ctc_ori                == 1)  call ctc_orientation(ii,init_frame,last_frame)
+  if (c_brc_ori                == 1)  call brc_orientation(ii,init_frame,last_frame)
+  if (c_frc_ori                == 1)  call frc_orientation(ii,init_frame,last_frame)
 
   if (c_rod_strain             == 1)  call rod_strain(ii,init_frame,last_frame)
   if (c_kin_energy             == 1)  call kin_energy(ii,init_frame,last_frame)
   if (c_second_work            == 1)  call second_work(ii,init_frame,last_frame)
 
-!     if (calcul_coordination         == 1)  call nb_coordination
-!     if (calcul_granulo              == 1)  call granulometry
-!     if (contact_dir                 == 1)  call contact_direction
 !     if (calcul_vitesse_moyenne      == 1)  call vitesse_moyenne
 !     if (calcul_persiste_contact     == 1)  call persiste_contact
 !     if (c_n_ctc_probability         == 1)  call ctc_probability
 !     if (c_f_list                    == 1)  call f_list
 !     if (c_fail_mode                 == 1)  call failure_mode
 !     if (c_list_interact             == 1)  call list_interact
-!     if (c_draw                      == 1)  call draw
-!     if (c_brc_dir                   == 1)  call branch_dir
-!     if (c_frc_dir                   == 1)  call forces_dir
+
 !     if (c_sign_aniso                == 1)  call signed_anisotropy
 !     if (c_clean_tresca              == 1)  call clean_tresca
 !     if (c_sign_aniso_l              == 1)  call signed_anisotropy_l
@@ -461,11 +504,10 @@ subroutine box_size(i_, init_, last_)
   
   implicit none
 
-  integer, intent(in)                      :: i_, init_, last_  
+  integer, intent(in)                      ::  i_, init_, last_
   integer                                  ::  i, j
-  real(kind=8)                             ::  x_max,y_max
-  real(kind=8)                             ::  x_min,y_min
  
+  ! Initializing. These are globals
   x_min =  9999.
   x_max = -9999.
   y_min =  9999.
@@ -593,8 +635,8 @@ subroutine read_bodies
         else 
           n_polyg = n_polyg + 1
         end if
-      ! The case this is a wall
-      else if (text5 == 'JONCx') then 
+      ! The case this is a wall. It can also be a cluster of DISKb's
+      else if (text5 == 'JONCx' .or. text5 =='DISKb') then 
         n_wall = n_wall + 1
       else 
         print*, 'Unknown body type'
@@ -643,12 +685,12 @@ subroutine read_bodies
       read(2,*) ! Skippable
       read(2,'(1X,A5)') text5
 
-      ! The case this is a disk
+      ! The case this is a disk. Or a cluster wall (It reads the same as normal disk)
       if (text5 == 'DISKx') then
         read(2,'(1X,A5)') text5
         if (text5 == 'PT2Dx') then
           TAB_BODIES(i)%shape = 'pt2dx'
-        else 
+        else
           TAB_BODIES(i)%shape = 'diskx'
         end if
 
@@ -724,16 +766,23 @@ subroutine read_bodies
           end do
         end if
       end if
-      ! The case this is a wall
-      if (text5 == 'JONCx') then 
-        ! We go back one line to RE-read the ax1 and ax2
-        backspace(2)
-        read(2,'(29X, 2(5x,D14.7,2X))') ax1, ax2
+      ! The case this is a wall (or a cluster wall)
+      if (text5 == 'JONCx' .or. text5 == 'DISKb') then 
 
         ! Loading the info for the wall
         TAB_BODIES(i)%shape = 'wallx'
         TAB_BODIES(i)%radius = radius
         TAB_BODIES(i)%center_ref = curr_center
+
+        if (text5 == 'DISKb') then
+          ax1 = box_width
+          ax2 = 0.0
+        else 
+          ! We go back one line to RE-read the ax1 and ax2
+          backspace(2)
+          read(2,'(29X, 2(5x,D14.7,2X))') ax1, ax2
+        end if
+
         TAB_BODIES(i)%ax1 = ax1
         TAB_BODIES(i)%ax2 = ax2
 
@@ -889,7 +938,7 @@ subroutine read_contacts(i_)
   implicit none
   
   integer, intent(in)           ::  i_
-  integer                       ::  i, j, error, cd , an, id, l_ver, iadj, l_seg
+  integer                       ::  i, j, k, error, cd , an, id, l_ver, iadj, l_seg, n_groups
   real(kind=8)                  ::  rn, rt, gap, rn_temp, rt_temp, gap_temp
   real(kind=8),dimension(2)     ::  coor_ctc, veloc_ctc, n_frame, coor_ctc_temp
   character(len=5)              ::  status, i_law, text5
@@ -1036,6 +1085,7 @@ subroutine read_contacts(i_)
       TAB_CONTACTS_RAW(i)%n_interact = 0
       TAB_CONTACTS_RAW(i)%i_law = i_law
       TAB_CONTACTS_RAW(i)%nature = text5
+      TAB_CONTACTS_RAW(i)%status = status
 
       TAB_CONTACTS_RAW(i)%iadj = iadj
 
@@ -1059,14 +1109,20 @@ subroutine read_contacts(i_)
   n_double = 0
   
   ! It's necessary to define the type of contact (i.e., simple or double)
-  do i=1,n_contacts_raw-1
+  do i=1,n_contacts_raw
     if (TAB_CONTACTS_RAW(i)%n_interact>0) cycle
-    if ((TAB_CONTACTS_RAW(i)%cd == TAB_CONTACTS_RAW(i+1)%cd) .and. &
-        (TAB_CONTACTS_RAW(i)%an == TAB_CONTACTS_RAW(i+1)%an)) then
-        TAB_CONTACTS_RAW(i)%n_interact=2
-        TAB_CONTACTS_RAW(i+1)%n_interact=2
-        n_double = n_double + 1
-    else
+    if (i .lt. n_contacts_raw) then
+      if ((TAB_CONTACTS_RAW(i)%cd == TAB_CONTACTS_RAW(i+1)%cd) .and. &
+          (TAB_CONTACTS_RAW(i)%an == TAB_CONTACTS_RAW(i+1)%an)) then
+          if (i==n_contacts_raw) continue
+          TAB_CONTACTS_RAW(i)%n_interact=2
+          TAB_CONTACTS_RAW(i+1)%n_interact=2
+          n_double = n_double + 1
+      else
+        TAB_CONTACTS_RAW(i)%n_interact=1
+        n_simple = n_simple + 1
+      end if
+    else 
       TAB_CONTACTS_RAW(i)%n_interact=1
       n_simple = n_simple + 1
     end if
@@ -1141,159 +1197,110 @@ subroutine read_contacts(i_)
     stop
   end if
 
-!   ! If there are cohesive particles they should know they are in a group
-!   n_groups = 0
+  ! Setting groups if necessary
+  if (c_set_groups == 1) then
+    n_groups = 0
 
-!   if (c_draw == 1) then
-!     print*,'---> Cohesive groups'
+    print*,'---> Setting groups'
 
-!     TAB_POLYG(:)%group = 0
-!     ! For all the particles
-!     do i=1, n_particles
-!       ! If this particle does not have a group
-!       if (TAB_POLYG(i)%group == 0) then
-!         ! Lets check if its contacts have
-!         do j=1, nb_ligneCONTACT
-!           icdent = TAB_CONTACTS(j)%icdent
-!           ianent = TAB_CONTACTS(j)%ianent
-!           ! is it cohesive?
-!           if (TAB_CONTACTS(j)%status(1:1) /= 'W') cycle
-!           if (TAB_CONTACTS(j)%gap > 0.0001) cycle
-!           ! if found as candidate
-!           if (icdent==i) then
-!             ! and the antagonist has a group
-!             if (TAB_POLYG(ianent)%group > 0) then
-!               ! Assign the same
-!               TAB_POLYG(icdent)%group = TAB_POLYG(ianent)%group
-!             end if
-!           ! if found as antagonist
-!           else if (ianent==i) then
-!             ! and the antagonist has a group
-!             if (TAB_POLYG(icdent)%group > 0) then
-!               ! Assign the same
-!               TAB_POLYG(ianent)%group = TAB_POLYG(icdent)%group
-!             end if
-!           end if
-!           ! We can break the do if found
-!           if (TAB_POLYG(i)%group > 0) then
-!             exit
-!           end if
-!         end do
-!       end if
+    TAB_BODIES(:)%group = 0
+    ! For all the particles
+    do i=1, n_bodies
+      ! No walls
+      if (TAB_BODIES(i)%shape == 'wallx') cycle
+      
+      ! If this particle does not have a group
+      if (TAB_BODIES(i)%group == 0) then
+        ! Lets check if its contacts have one. It is done over the raw list
+        ! because status cannot be set for multiple contact points
+        do j=1, n_contacts_raw
+          cd = TAB_CONTACTS_RAW(j)%cd
+          an = TAB_CONTACTS_RAW(j)%an
+          ! is it cohesive?
+          if (TAB_CONTACTS_RAW(j)%status(1:1) /= 'W') cycle
+          ! if found as candidate
+          if (cd==i) then
+            ! and the antagonist has a group
+            if (TAB_BODIES(an)%group > 0) then
+              ! We assign the same
+              TAB_BODIES(cd)%group = TAB_BODIES(an)%group
+            end if
+            ! if found as antagonist
+          else if (an==i) then
+            ! and the candidate has a group
+            if (TAB_BODIES(cd)%group > 0) then
+              ! We assign the same
+              TAB_BODIES(an)%group = TAB_BODIES(cd)%group
+            end if
+          end if
+          ! We can break the do if found
+          if (TAB_BODIES(i)%group > 0) then
+            exit
+          end if
+        end do
+      end if
 
-!       ! If was assigned. Then loop for non initialized neighbors
-!       if (TAB_POLYG(i)%group > 0) then
-!         ! And we loop looking for neighbors
-!         do j=1, nb_ligneCONTACT
-!           icdent = TAB_CONTACTS(j)%icdent
-!           ianent = TAB_CONTACTS(j)%ianent
-!           ! is it cohesive?
-!           if (TAB_CONTACTS(j)%status(1:1) /= 'W') cycle
-!           if (TAB_CONTACTS(j)%gap > 0.0001) cycle
-!           ! if found as candidate
-!           if (icdent==i) then
-!             ! we change the antagonist
-!             TAB_POLYG(ianent)%group = TAB_POLYG(icdent)%group
-!           ! if found as antagonist
-!           else if (ianent==i) then
-!             ! we change the candidate
-!             TAB_POLYG(icdent)%group = TAB_POLYG(ianent)%group
-!           end if
-!         end do
-!       end if
+      ! If was assigned. Then loop for non initialized neighbors
+      if (TAB_BODIES(i)%group > 0) then
+        ! And we loop looking for neighbors
+        do j=1, n_contacts_raw
+          cd = TAB_CONTACTS_RAW(j)%cd
+          an = TAB_CONTACTS_RAW(j)%an
+          ! is it cohesive?
+          if (TAB_CONTACTS_RAW(j)%status(1:1) /= 'W') cycle
+          ! if found as candidate
+          if (cd==i) then
+            ! we change the antagonist
+            TAB_BODIES(an)%group = TAB_BODIES(cd)%group
+            ! if found as antagonist
+          else if (an==i) then
+            ! we change the candidate
+            TAB_BODIES(cd)%group = TAB_BODIES(an)%group
+          end if
+        end do
+      end if
 
-!       ! if after all this research the group is still zero... so a new group begins
-!       if (TAB_POLYG(i)%group == 0) then
-!         n_groups = n_groups + 1
-!         TAB_POLYG(i)%group = n_groups
-!         ! And we loop again to change its neighbors
-!         do j=1, nb_ligneCONTACT
-!           icdent = TAB_CONTACTS(j)%icdent
-!           ianent = TAB_CONTACTS(j)%ianent
-!           ! is it cohesive?
-!           if (TAB_CONTACTS(j)%status(1:1) /= 'W') cycle
-!           if (TAB_CONTACTS(j)%gap > 0.0001) cycle
-!           ! if found as candidate
-!           if (icdent==i) then
-!             ! we change the antagonist
-!             TAB_POLYG(ianent)%group = TAB_POLYG(icdent)%group
-!             ! Look for neighbors of the neighbor
-!             do k=1, nb_ligneCONTACT
-!               if (TAB_CONTACTS(k)%status(1:1) /= 'W') cycle
-!               if (TAB_CONTACTS(k)%gap > 0.0001) cycle
-!               if (TAB_CONTACTS(k)%icdent == ianent) then
-!                 TAB_POLYG(TAB_CONTACTS(k)%icdent)%group = TAB_POLYG(ianent)%group
-!               else if (TAB_CONTACTS(j)%ianent == ianent) then
-!                 TAB_POLYG(TAB_CONTACTS(k)%ianent)%group = TAB_POLYG(ianent)%group
-!               end if
-!             end do
-!           ! if found as antagonist
-!           else if (ianent==i) then
-!             ! we change the candidate
-!             TAB_POLYG(icdent)%group = TAB_POLYG(ianent)%group
-!             ! Look for neighbors of the neighbor
-!             do k=1, nb_ligneCONTACT
-!               if (TAB_CONTACTS(k)%status(1:1) /= 'W') cycle
-!               if (TAB_CONTACTS(k)%gap > 0.0001) cycle
-!               if (TAB_CONTACTS(k)%icdent == icdent) then
-!                 TAB_POLYG(TAB_CONTACTS(k)%icdent)%group = TAB_POLYG(icdent)%group
-!               else if (TAB_CONTACTS(j)%ianent == icdent) then
-!                 TAB_POLYG(TAB_CONTACTS(k)%ianent)%group = TAB_POLYG(icdent)%group
-!               end if
-!             end do
-!           end if
-!         end do
-!       end if
-!     end do
-!   end if 
-
-! !      n_groups = n_groups + 1
-! !      TAB_POLYG(i)%group = n_groups
-! !      ! We start to look for this particle in the contact list 
-! !      do j=1, nb_ligneCONTACT
-! !        ! If we find it 
-! !        if(TAB_CONTACTS(j)%icdent == i) then
-! !          ! we ask it is cohesive  
-! !          if (TAB_CONTACTS(j)%status(1:1) == 'W') then
-! !            ! If its antagonist does not have already a group
-! !            if (TAB_POLYG(TAB_CONTACTS(j)%ianent)%group == 0) then
-! !              ! We assign the group to the antagonist
-! !              TAB_POLYG(TAB_CONTACTS(j)%ianent)%group = n_groups
-! !
-! !            ! If its antagonist already has a group
-! !            else
-! !              ! We modify the current group
-! !              n_groups = TAB_POLYG(TAB_CONTACTS(j)%ianent)%group
-! !              ! We reassign the group of the current particle
-! !              TAB_POLYG(i)%group = n_groups
-! !            end if 
-! !            ! We look for other contacts including the antagonist 
-! !            do k=j+1, nb_ligneCONTACT
-! !              if(TAB_CONTACTS(k)%icdent == TAB_CONTACTS(j)%ianent .or. TAB_CONTACTS(k)%ianent == TAB_CONTACTS(j)%ianent) then
-! !                if (TAB_CONTACTS(k)%status(1:1) == 'W') then
-! !                  TAB_POLYG(TAB_CONTACTS(k)%icdent)%group = n_groups
-! !                  TAB_POLYG(TAB_CONTACTS(k)%ianent)%group = n_groups
-! !                end if
-! !              end if
-! !            end do
-! !          end if
-! !        end if
-! !      enddo
-! !    ! If the particle has already a group
-! !    else
-! !      ! We look for other contacts with this particle 
-! !      do j=1, nb_ligneCONTACT
-! !        ! If there it exits as candidate in the contact list 
-! !        if(TAB_CONTACTS(j)%icdent == i) then
-! !          ! If it is cohesive
-! !          if (TAB_CONTACTS(j)%status(1:1) == 'W') then
-! !            ! We asign the group to the current antagonist
-! !            TAB_POLYG(TAB_CONTACTS(j)%ianent)%group = TAB_POLYG(i)%group
-! !          end if
-! !        end if
-! !      end do
-! !    end if
-! !  end do
+      ! if after all this research the group is still zero... so a new group begins
+      if (TAB_BODIES(i)%group == 0) then
+        n_groups = n_groups + 1
+        TAB_BODIES(i)%group = n_groups
+        ! And we loop again to change its neighbors
+        do j=1, n_contacts_raw
+          cd = TAB_CONTACTS_RAW(j)%cd
+          an = TAB_CONTACTS_RAW(j)%an
+          ! is it cohesive?
+          if (TAB_CONTACTS_RAW(j)%status(1:1) /= 'W') cycle
+          ! if found as candidate
+          if (cd==i) then
+            ! we change the antagonist
+            TAB_BODIES(an)%group = TAB_BODIES(cd)%group
+            ! Look for neighbors of the neighbor
+            do k=1, n_contacts_raw
+              if (TAB_CONTACTS_RAW(k)%status(1:1) /= 'W') cycle
+              if (TAB_CONTACTS_RAW(k)%cd == an) then
+                TAB_BODIES(TAB_CONTACTS(k)%cd)%group = TAB_BODIES(an)%group
+              else if (TAB_CONTACTS(j)%an == an) then
+                TAB_BODIES(TAB_CONTACTS(k)%an)%group = TAB_BODIES(an)%group
+              end if
+            end do
+          ! if found as antagonist
+          else if (an==i) then
+            ! we change the candidate
+            TAB_BODIES(cd)%group = TAB_BODIES(an)%group
+            ! Look for neighbors of the neighbor
+            do k=1, n_contacts_raw
+              if (TAB_CONTACTS_RAW(k)%status(1:1) /= 'W') cycle
+              if (TAB_CONTACTS_RAW(k)%cd == cd) then
+                TAB_BODIES(TAB_CONTACTS_RAW(k)%cd)%group = TAB_BODIES(cd)%group
+              else if (TAB_CONTACTS_RAW(j)%an == cd) then
+                TAB_BODIES(TAB_CONTACTS_RAW(k)%an)%group = TAB_BODIES(cd)%group
+              end if
+            end do
+          end if
+        end do
+      end if
+    end do
+  end if 
 
 end subroutine read_contacts
 
@@ -1359,7 +1366,7 @@ subroutine walls_frc(i_, init_, last_)
   implicit none
 
   integer, intent(in)                      :: i_, init_, last_
-  integer                                  :: i, j
+  integer                                  :: i, j, cd, an
   real(kind=8), dimension(2)               :: f_vec
   character, dimension(1)                  :: id_wall=' '
   real(kind=8), allocatable,dimension(:,:) :: array_wall
@@ -1387,6 +1394,8 @@ subroutine walls_frc(i_, init_, last_)
 
   ! We look for interactions with walls
   do i=1, n_contacts
+    cd = TAB_CONTACTS(i)%cd
+    an = TAB_CONTACTS(i)%an
     if (TAB_CONTACTS(i)%nature == 'DKJCx' .or. TAB_CONTACTS(i)%nature == 'PLJCx') then
       ! Setting the correct id matching the number of wall
       j = TAB_CONTACTS(i)%an - (n_bodies - n_wall - n_pt2d)
@@ -1396,6 +1405,17 @@ subroutine walls_frc(i_, init_, last_)
 
       array_wall(j,1) = array_wall(j,1) + f_vec(1)
       array_wall(j,2) = array_wall(j,2) + f_vec(2)
+    ! Special case for rough walls
+    else if(cd .gt. n_disk .or. an .gt. (n_disk+n_polyg+n_cluster)) then
+      ! Setting the correct id matching the number of wall
+      j = TAB_CONTACTS(i)%an - (n_bodies - n_wall - n_pt2d)
+
+      ! The force vector
+      f_vec = TAB_CONTACTS(i)%rn*TAB_CONTACTS(i)%n_frame + TAB_CONTACTS(i)%rt*TAB_CONTACTS(i)%t_frame
+
+      array_wall(j,1) = array_wall(j,1) + f_vec(1)
+      array_wall(j,2) = array_wall(j,2) + f_vec(2)
+    ! Special case for rough walls
     end if 
   end do
 
@@ -1504,6 +1524,10 @@ end subroutine compacity
     if  (TAB_CONTACTS(i)%nature == 'PTPT2') cycle
     cd      = TAB_CONTACTS(i)%cd
     an      = TAB_CONTACTS(i)%an
+
+    ! Special case for rough walls
+    if (cd .gt. n_disk .or. an .gt. n_disk) cycle
+
     nik     = TAB_CONTACTS(i)%n_frame
     tik     = TAB_CONTACTS(i)%t_frame
     Rnik    = TAB_CONTACTS(i)%rn
@@ -1584,7 +1608,7 @@ subroutine coordination(i_, init_, last_)
   implicit none
   
   integer, intent(in)                      :: i_, init_, last_
-  integer                                  :: i
+  integer                                  :: i, cd, an
   real(kind=8)                             :: z, zc, np
   
   ! Initializing variables
@@ -1611,6 +1635,11 @@ subroutine coordination(i_, init_, last_)
     if (TAB_CONTACTS(i)%nature == 'PLJCx') cycle 
     if (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
     if (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    cd = TAB_CONTACTS(i)%cd
+    an = TAB_CONTACTS(i)%an
+
+    if (cd .gt. n_disk .or. an .gt. (n_disk+n_polyg+n_cluster)) cycle
 
     ! Computing the number of contacts if they are active
     if (abs(TAB_CONTACTS(i)%rn) .lt. 1e-8) cycle 
@@ -1984,6 +2013,848 @@ subroutine granulo
   
 end subroutine granulo
 
+!==============================================================================
+! Generates a list of radius for all the particles
+!==============================================================================
+subroutine list_radius
+
+  implicit none
+  
+  integer                                  :: i
+  
+  ! Opening file
+  open(unit=204,file='./POSTPRO/LIST_RADIUS.DAT',status='replace')
+
+  ! For all the bodies
+  do i=1, n_bodies
+    ! Excluding walls and points
+    if (TAB_BODIES(i)%shape == 'wallx' .or. TAB_BODIES(i)%shape == 'pt2dx') cycle
+
+    ! Write radius
+    write(204, '(1X,E12.5)') TAB_BODIES(i)%radius
+  end do
+
+  ! Close the unit
+  close(204)
+
+  ! General info
+  print*, 'Write Radius List         ---> Ok!'
+
+end subroutine list_radius
+
+!==============================================================================
+! Generates a list of perimeters for each particles
+!==============================================================================
+subroutine list_perimeter
+
+  implicit none
+  
+  integer                                  :: i, j
+  real(kind=8)                             :: cur_perimeter
+  
+  ! Opening file
+  open(unit=205,file='./POSTPRO/LIST_PERIMETER.DAT',status='replace')
+
+  ! For all the bodies
+  do i=1, n_bodies
+    ! Initializing
+    cur_perimeter = 0.
+    ! Excluding walls and points
+    if (TAB_BODIES(i)%shape == 'wallx' .or. TAB_BODIES(i)%shape == 'pt2dx') cycle
+
+    ! Case of a disk
+    if (TAB_BODIES(i)%shape== 'diskx') then
+      cur_perimeter = 2*pi*TAB_BODIES(i)%radius
+    else if (TAB_BODIES(i)%shape== 'polyx') then
+      do j=1, TAB_BODIES(i)%n_vertex-1
+        cur_perimeter = cur_perimeter + ((TAB_BODIES(i)%vertex(j+1,1)-TAB_BODIES(i)%vertex(j,1))**2 + &
+                                         (TAB_BODIES(i)%vertex(j+1,2)-TAB_BODIES(i)%vertex(j,2))**2)**0.5
+      end do
+    else
+      print*, 'This particule shape is not defined:: LIST_PERIMETER'
+      stop
+    end if
+
+    ! Write radius
+    write(205, '(1X,E12.5)') cur_perimeter
+  end do
+
+  ! Close the unit
+  close(205)
+
+  ! General info
+  print*, 'Write Perimeter  List     ---> Ok!'
+
+end subroutine list_perimeter
+
+!==============================================================================
+! Contact forces lists for PDF and more
+!==============================================================================
+subroutine frc_list(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i
+  real(kind=8)                             :: Rnik, Rtik
+  character(len=26)                        :: file_c
+  logical                                  :: dir_ctcdir
+
+  ! Cleaning or creating the folder if necessary
+  if (i_==init_) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/F_LIST', exist=dir_ctcdir)
+    if(dir_ctcdir) then
+      ! Cleaning
+      call system('rm ./POSTPRO/F_LIST/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/F_LIST')
+    end if
+  end if
+
+  ! The file name
+  file_c       =  './POSTPRO/F_LIST/F_L.    '
+
+  if (i_<10) then
+    WRITE(file_c(22:23),'(I1)')   i_
+  else if ( (i_>=10) .and. (i_<100) ) then
+    WRITE(file_c(22:24),'(I2)')   i_
+  else if ( (i_>=100).and. (i_<1000) ) then
+    WRITE(file_c(22:25),'(I3)')   i_
+  else if ( (i_>=1000).and. (i_<10000) ) then
+    WRITE(file_c(22:26),'(I4)')   i_
+  end if
+
+  ! Opening the file
+  open(unit=110,file=file_c,status='replace')
+
+  ! Writing the heading
+  write(110,*) '     FN     ', '     FT      '
+
+  do i=1, n_contacts
+    ! Only contacts between particles
+    if (TAB_CONTACTS(i)%nature == 'PLJCx' .or. TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    Rnik = TAB_CONTACTS(i)%rn
+    Rtik = TAB_CONTACTS(i)%rt
+    ! Only forces above a given threshold
+    if (abs(Rnik) .lt. 1e-8) cycle
+
+    write(110,'(2(1X,E12.5))') Rnik, Rtik
+  end do
+
+  close(110)
+
+  print*, 'Write Force List             ---> Ok!'
+
+end subroutine frc_list
+
+!==============================================================================
+! Contact forces lists for PDF and more
+!==============================================================================
+subroutine pore_dist
+  
+  implicit none
+
+  integer                                  :: i, j, k, n_bins, n_iters
+  real(kind=8)                             :: avg_rad, min_bin, max_bin, dist_cc, n_no_float
+  real(kind=8)                             :: rand1, rand2, cur_x, cur_y
+  real(kind=8), allocatable, dimension(:)  :: bins, freq
+  
+  ! If this is the first time, we open the file and write the heading
+  open (unit=111,file='./POSTPRO/PORE_DIST.DAT',status='replace')
+  write(111,*) '#   Bin     ','    P_p    '
+
+  ! The number of bins
+  n_bins = 32
+
+  ! Computing the average radius
+  avg_rad = 0
+  do i=1, n_bodies - n_wall
+    avg_rad = avg_rad + TAB_BODIES(i)%radius
+  end do
+
+  avg_rad = avg_rad/(n_bodies-n_wall)
+  
+  ! Setting the limits for the binds
+  min_bin = avg_rad/25
+  max_bin = avg_rad*5
+
+  ! Initializing the bins
+  if (allocated(bins)) deallocate(bins)
+  allocate (bins(n_bins))
+  bins(:) = 0
+
+  do i=1, n_bins
+    bins(i) = min_bin + (i-1)*(max_bin - min_bin)/n_bins
+  end do
+
+  ! Initializing freq
+  if (allocated(freq)) deallocate(freq)
+  allocate (freq(n_bins))
+  freq(:) = 0
+
+  ! Initializing the number of iterations per size
+  n_iters = 1000
+
+  do i=1, n_bins
+    !print*, 'i: ', i
+    n_no_float = 0
+    do j=1, n_iters
+      !print*, 'j: ', j
+      ! Two random numbers for x and y position of probe
+      call random_number(rand1)
+      call random_number(rand2)
+
+      ! Setting current position
+      cur_x = x_min + bins(i) + (x_max - x_min - 2*bins(i))*rand1
+      cur_y = y_min + bins(i) + (y_max - y_min - 2*bins(i))*rand2
+
+      ! Fishing the pore
+      do k=1, n_bodies-n_wall
+        !print*, 'k: ', k
+        ! Distance center to curr
+        dist_cc = ((TAB_BODIES(k)%center(1)-cur_x)**2 + (TAB_BODIES(k)%center(2)-cur_y)**2)**0.5
+        if (dist_cc .lt. TAB_BODIES(k)%radius+bins(i)) then
+          n_no_float = n_no_float + 1
+          exit
+        end if
+      end do
+    end do
+    ! Setting the probability for this bin
+    !print*, n_no_float
+    freq(i) = (n_iters - n_no_float)/n_iters
+    !print*, freq(i)
+  end do
+
+  ! Writing the bins and freqs
+  do i=1, n_bins
+    write(111,'(2(1X,E12.5))') bins(i), freq(i)
+  end do
+
+  ! Closing the file
+  close(111)
+  
+  ! General info
+  print*, 'Write Pore Dist          ---> Ok!'
+
+end subroutine pore_dist
+
+!==============================================================================
+! Pore size
+!==============================================================================
+subroutine pore_size
+  
+  implicit none
+
+  integer                                  :: i, j, k, n_zones, counter_reg, max_reg
+  integer, allocatable, dimension(:,:)     :: zones, regions
+  real(kind=8)                             :: dist_cc, delta_x, delta_y
+  real(kind=8)                             :: cur_x, cur_y
+  real(kind=8), allocatable, dimension(:)  :: resume_c
+  
+  
+  ! If this is the first time, we open the file and write the heading
+  open (unit=112,file='./POSTPRO/PORE_SIZE_SUM.DAT',status='replace')
+  !write(112,*) '#   Size     '
+  
+  ! Initializing the meshing size
+  n_zones = 1000
+
+  ! Initializing the zones array
+  if (allocated(zones)) deallocate(zones)
+  allocate(zones(n_zones,n_zones))
+
+  zones(:,:) = 0
+
+  ! Size of the mesh
+  delta_x = (x_max - x_min)/n_zones
+  delta_y = (y_max - y_min)/n_zones
+
+  ! Filling the mesh (0 no initialized or pore). (-1 solid)
+  print*, 'mesh'
+  do i=1, n_zones
+    do j=1, n_zones
+      ! Setting current position
+      cur_x = x_min + delta_x/2 + delta_x*(i-1)
+      cur_y = y_min + delta_y/2 + delta_y*(j-1)
+
+      ! Checking if the point is inside any particle
+      do k=1, n_bodies-n_wall
+        !print*, 'k: ', k
+        ! Distance center to curr
+        dist_cc = ((TAB_BODIES(k)%center(1)-cur_x)**2 + (TAB_BODIES(k)%center(2)-cur_y)**2)**0.5
+        if (dist_cc .lt. TAB_BODIES(k)%radius) then
+          zones(i,j) = 1
+          exit
+        end if
+      end do
+    end do
+  end do
+
+  ! Initializing the regions array
+  if (allocated(regions)) deallocate(regions)
+  allocate(regions(n_zones,n_zones))
+
+  regions(:,:) = 0
+
+  counter_reg = 0
+  print*, 'regions'
+  do i=1, n_zones
+    do j=1, n_zones
+      if (zones(i,j) == 1) cycle
+      ! The first row is special
+      if (i==1) then
+        ! The first element is special
+        if (j==1) then
+          if (zones(i,j) == 0) then
+            counter_reg = counter_reg + 1
+            regions(i,j) = counter_reg
+          end if
+        else 
+          ! Checking the contigous element
+          if (zones(i,j) == 0) then
+            if (regions(i,j-1) .gt. 0) then
+              regions(i,j) = regions(i,j-1)
+            else 
+              counter_reg = counter_reg + 1
+              regions(i,j) = counter_reg
+            end if
+          end if
+        end if
+      ! The first column is special
+      else if(j==1) then 
+        if (zones(i,j) == 0) then
+          if (regions(i-1,j) .gt. 0) then
+            regions(i,j) = regions(i-1,j)
+          else 
+            counter_reg = counter_reg + 1
+            regions(i,j) = counter_reg
+          end if
+        end if
+      ! The standard case (check down and left)
+      else 
+        if (zones(i,j) == 0) then
+          if (regions(i,j-1) .gt. 0) then
+            regions(i,j) = regions(i,j-1)
+          else if (regions(i-1,j) .gt. 0) then
+            regions(i,j) = regions(i-1,j)
+          else 
+            counter_reg = counter_reg + 1
+            regions(i,j) = counter_reg
+          end if 
+        end if
+      end if
+      ! Reseting counter for visu
+      ! if (counter_reg == 9) counter_reg = 0
+    end do
+  end do
+
+  ! print*, counter_reg
+
+  ! print*, 'clean'
+
+  ! max_reg = 0
+
+  ! do i=1, n_zones
+  !   do j=2, n_zones-1
+  !     if (zones(i,j) == 1) cycle
+  !     counter_reg = 999999
+  !     if (i==1) then 
+  !       if (j==1) cycle
+  !       counter_reg = min(counter_reg,regions(i,  j  ))
+  !       if (regions(i,j-1) .gt. 0 ) counter_reg = min(counter_reg,regions(i,  j-1))
+  !       if (regions(i,j+1) .gt. 0 ) counter_reg = min(counter_reg,regions(i,  j+1))
+  !       if (regions(i+1,j) .gt. 0 ) counter_reg = min(counter_reg,regions(i+1,j  ))
+  !       if (regions(i+1,j-1) .gt. 0 ) counter_reg = min(counter_reg,regions(i+1,j-1))
+  !       if (regions(i+1,j+1) .gt. 0 ) counter_reg = min(counter_reg,regions(i+1,j+1))
+        
+  !       regions(i,j) = counter_reg
+  !     else if (i==n_zones) then
+  !       counter_reg = min(counter_reg,regions(i,  j  ))
+  !       if (regions(i,j-1  ) .gt. 0 ) counter_reg = min(counter_reg,regions(i,  j-1))
+  !       if (regions(i,j+1  ) .gt. 0 ) counter_reg = min(counter_reg,regions(i,  j+1))
+  !       if (regions(i-1,j  ) .gt. 0 ) counter_reg = min(counter_reg,regions(i-1,j  ))
+  !       if (regions(i-1,j-1) .gt. 0 ) counter_reg = min(counter_reg,regions(i-1,j-1))
+  !       if (regions(i-1,j+1) .gt. 0 ) counter_reg = min(counter_reg,regions(i-1,j+1))
+  !     else 
+  !       counter_reg = min(counter_reg,regions(i,  j  ))
+  !       if (regions(i,j-1  ) .gt. 0 ) counter_reg = min(counter_reg,regions(i,  j-1))
+  !       if (regions(i,j+1  ) .gt. 0 ) counter_reg = min(counter_reg,regions(i,  j+1))
+  !       if (regions(i-1,j  ) .gt. 0 ) counter_reg = min(counter_reg,regions(i+1,j  ))
+  !       if (regions(i-1,j-1) .gt. 0 ) counter_reg = min(counter_reg,regions(i+1,j-1))
+  !       if (regions(i-1,j+1) .gt. 0 ) counter_reg = min(counter_reg,regions(i+1,j+1))
+  !       if (regions(i+1,j  ) .gt. 0 ) counter_reg = min(counter_reg,regions(i-1,j  ))
+  !       if (regions(i+1,j-1) .gt. 0 ) counter_reg = min(counter_reg,regions(i-1,j-1))
+  !       if (regions(i+1,j+1) .gt. 0 ) counter_reg = min(counter_reg,regions(i-1,j+1))
+  !     end if 
+  !     max_reg = max(max_reg,counter_reg)
+  !   end do
+  ! end do
+
+  ! Initializing
+  if (allocated(resume_c)) deallocate(resume_c)
+  allocate(resume_c(counter_reg))
+  !print*, 'max_reg', max_reg
+  resume_c(:) = 0
+  do i=1, n_zones
+    do j=1, n_zones
+      if(regions(i,j) .gt. 0) then
+        !if (regions(i,j) .gt. max_reg) then
+          !print*, 'oops'
+        !  cycle
+        !end if
+        resume_c(regions(i,j)) = resume_c(regions(i,j)) + 1
+      end if 
+    end do
+  end do
+
+  !resume_c = resume_c*(delta_x*delta_y)
+
+  print*, 'print'
+  ! Writing the bins and freqs
+  ! do i=1, n_zones
+  !   do j=1, n_zones
+  !     if (j == n_zones) then
+  !       write(112,'(1(I2))') regions(i,j)
+  !       !write(112,'(1(I2))') zones(i,j)
+  !     else 
+  !       write(112,'(1(I2))', advance='no') regions(i,j)
+  !       !write(112,'(1(I2))', advance='no') zones(i,j)
+  !     end if
+  !   end do
+  ! end do
+  do i=1, counter_reg
+    write(112,'(1(1X,E12.5))') resume_c(i)
+  end do
+
+  ! Closing the file
+  close(112)
+  
+  ! General info
+  print*, 'Write Pore Size          ---> Ok!'
+
+end subroutine pore_size
+
+!==============================================================================
+! Contacts orientation
+!==============================================================================
+subroutine ctc_orientation(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                           :: i_, init_, last_ 
+  real(kind=8)                                  :: interval
+  real(kind=8)                                  :: angcurr, maxint, minint
+  integer                                       :: i, j, ninter, contotal, contmean
+  real(kind=8), dimension(:,:), allocatable     :: theta_interval
+  real(kind=8), dimension(2)                    :: nik
+  character(len=27)                             :: f_name
+  logical                                       :: dir_ctcdir
+  
+  ! Cleaning or creating the folder if necessary
+  if (i_ == init_) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/CTCDIR', exist=dir_ctcdir)
+    if(dir_ctcdir) then
+      ! Cleaning
+      call system('rm ./POSTPRO/CTCDIR/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/CTCDIR')
+    end if
+  end if
+  
+  ! The file name
+  f_name  =  './POSTPRO/CTCDIR/CDIR.    '
+  
+  if (i_<10) then
+    WRITE(f_name(23:24),'(I1)')   i_
+  else if ( (i_>=10) .and. (i_<100) ) then
+    WRITE(f_name(23:25),'(I2)')   i_
+  else if ( (i_>=100).and. (i_<1000) ) then
+    WRITE(f_name(23:26),'(I3)')   i_
+  else if ( (i_>=1000).and. (i_<10000) ) then
+    WRITE(f_name(23:27),'(I4)')   i_
+  else 
+    print*, "Out of numbers ---> Orientations"
+    stop
+  end if
+  
+  ! Number of intervals over pi
+  ninter = 36
+  
+  ! Initializing variables
+  contotal = 0
+  interval = pi/ninter
+  
+  ! Allocating the vector that will contain the contact direction and frequency
+  if (allocated(theta_interval)) deallocate(theta_interval)
+  allocate(theta_interval(ninter,2))
+  
+  ! Computing the contact direction and initializing the frequency
+  do i=1, ninter
+    theta_interval(i,1) = (interval/2)*(2*i-1)
+    theta_interval(i,2) = 0
+  end do
+  
+  ! Computing the frequency for each interval
+  do i=1, ninter
+    ! The width of the interval
+    minint = interval*(i - 1)
+    maxint = interval*i
+    do j=1,n_contacts
+      ! Only between discs
+      if(TAB_CONTACTS(j)%nature =='PLJCx' .or. TAB_CONTACTS(j)%nature =='DKJCx') cycle
+      ! Only active contacts
+      if(abs(TAB_CONTACTS(j)%rn) .le. 1.D-8) cycle
+      ! The normal vector
+      nik  = TAB_CONTACTS(j)%n_frame
+      
+      ! The 1 and 2 quadrants only
+      ! Changing the normal vector direction if necessary
+      if(nik(2) .lt. 0) then
+        nik(1)  = -nik(1)
+        nik(2)  = -nik(2)
+      end if
+      
+      ! Finding the current angle. Note the vector nik is already unitary!
+      angcurr = acos(nik(1))
+      
+      ! Checking the interval
+      if(angcurr .lt. maxint .and. angcurr .ge. minint) then
+        theta_interval(i,2) = theta_interval(i,2) + 1
+      end if
+    end do
+  end do
+  
+  ! Computing the number of active contacts
+  do i=1, ninter
+    contotal = contotal + int(theta_interval(i,2))
+  end do
+  
+  ! Normalizing
+  theta_interval(:,2) = theta_interval(:,2)/(contotal)
+  
+  ! Opening the file
+  open(unit=113,file=f_name,status='replace')
+  
+  ! Writing the heading 
+  write(113,*) '# Theta(Rad) ', '  Freq_norm  '
+  
+  ! Writing
+  do i=1, ninter
+    write(113,'(2(1X,E12.5))') theta_interval(i,1), theta_interval(i,2)
+  end do
+  
+  ! Writing the 3rd and 4th quadrants
+  do i=1, ninter
+    write(113,'(2(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,2)
+  end do
+  
+  close(113)
+  
+  print*, 'Write Contacts dir              ---> Ok!'
+  
+end subroutine ctc_orientation
+
+!==============================================================================
+! Branch orientation
+!==============================================================================
+subroutine brc_orientation(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                          :: i_, init_, last_
+  integer                                      :: i, j, ninter, contotal, cd, an
+  real(kind=8)                                 :: interval, pro_n, pro_t
+  real(kind=8)                                 :: angcurr, maxint, minint
+  real(kind=8), dimension(2)                   :: nik, Lik, tanik
+  real(kind=8), dimension(:,:), allocatable    :: theta_interval
+  character(len=26)                            :: f_name
+  logical                                      :: dir_ctcdir
+
+  ! Cleaning or creating the folder if necessary
+  if (i_ == init_) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/BRCDIR', exist=dir_ctcdir)
+    if(dir_ctcdir) then
+      ! Cleaning
+      call system('rm ./POSTPRO/BRCDIR/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/BRCDIR')
+    end if
+  end if
+
+  ! The file name
+  f_name  =  './POSTPRO/BRCDIR/BDIR.    '
+
+  if (i_<10) then
+    WRITE(f_name(23:23),'(I1)')   i_
+  else if ( (i_>=10) .and. (i_<100) ) then
+    WRITE(f_name(23:24),'(I2)')   i_
+  else if ( (i_>=100).and. (i_<1000) ) then
+    WRITE(f_name(23:25),'(I3)')   i_
+  else if ( (i_>=1000).and. (i_<10000) ) then
+    WRITE(f_name(23:26),'(I4)')   i_
+  end if
+
+  ! Opening the file
+  open(unit=114,file=f_name,status='replace')
+
+  ! Number of intervals over pi
+  ninter = 36
+
+  ! Initializing variables
+  contotal = 0
+  interval = pi/ninter
+
+  ! Allocating the vector that will contain the contact direction and frequency
+  if (allocated(theta_interval)) deallocate(theta_interval)
+  allocate(theta_interval(ninter,4))
+
+  ! Computing the contact direction, initializing the frequency, and the total branch sum
+  do i=1, ninter
+    theta_interval(i,1) = (interval/2)*(2*i-1)
+    theta_interval(i,2) = 0
+    theta_interval(i,3) = 0
+    theta_interval(i,4) = 0
+  end do
+
+  ! Computing the frequency for each interval
+  do i=1, ninter
+    ! The width of the interval
+    minint = interval*(i - 1)
+    maxint = interval*i
+    do j=1,n_contacts
+      cd = TAB_CONTACTS(j)%cd
+      an = TAB_CONTACTS(j)%an
+      ! Only between discs
+      if(TAB_CONTACTS(j)%nature == 'PLJCx' .or. TAB_CONTACTS(j)%nature == 'DKJCx') cycle
+
+      ! Only active contacts
+      if(abs(TAB_CONTACTS(j)%rn) .lt. 1.D-9) cycle
+
+      ! The branch vector
+      Lik(:) = TAB_BODIES(cd)%center(:)-TAB_BODIES(an)%center(:)
+
+      if (flag_periodic==1) then
+        ! Correcting the branch orientation and length if necessary
+        !if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+        if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 0.5*(l_periodic)) then
+          ! This is a periodic case
+          !if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+          Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
+          !end if
+          ! Y component
+          !if (Lik(2) .gt. (max_d_vert_an + max_d_vert_cd)) then
+          !Lik(2) = Lik(2) - y_period*(Lik(2)/abs(Lik(2)))
+        end if
+      end if 
+
+      ! The normal vector
+      nik  = TAB_CONTACTS(j)%n_frame
+
+      ! The tangential vector - xz plane!
+      !tik = TAB_CONTACTS(j)%t
+      !sik = TAB_CONTACTS(j)%s
+      !tanik = sik*TAB_CONTACTS(j)%rs + tik*TAB_CONTACTS(j)%rt
+
+      ! unitary
+      !tanik = tanik/sqrt(tanik(1)**2 + tanik(2)**2 + tanik(3)**2)
+
+      ! Normal projection
+      pro_n = abs(Lik(1)*nik(1) + Lik(2)*nik(2))
+
+      ! The 1 and 2 quadrants only
+      ! Changing the vector direction if necessary
+      if(nik(2) .lt. 0) then
+        nik(1) = -nik(1)
+        nik(2) = -nik(2)
+      end if
+
+      tanik(1) = nik(2)
+      tanik(2) = -nik(1)
+
+      ! Tangential projection
+      pro_t = Lik(1)*tanik(1) + Lik(2)*tanik(2)
+
+      !if (pro_n .lt. 0.6*pro_t) cycle
+
+      ! Finding the current angle. Note the vector nik is unitary!
+      angcurr = acos(nik(1))
+
+      ! Checking the interval
+      if(angcurr .lt. maxint .and. angcurr .ge. minint) then
+        theta_interval(i,2) = theta_interval(i,2) + 1
+        theta_interval(i,3) = theta_interval(i,3) + pro_n
+        theta_interval(i,4) = theta_interval(i,4) + pro_t
+      end if
+    end do
+  end do
+
+  ! Computing the number of active contacts
+  do i=1, ninter
+    contotal = contotal + int(theta_interval(i,2))
+  end do
+
+  ! The averages
+  theta_interval(:,3) = theta_interval(:,3)/(theta_interval(:,2))
+  theta_interval(:,4) = theta_interval(:,4)/(theta_interval(:,2))
+
+  ! Writing the heading
+  write(114,*) '# Theta(Rad) ', '    <ln>    ', '    <lt>    '
+
+  ! Writing
+  do i=1, ninter
+    write(114,'(3(1X,E12.5))') theta_interval(i,1), theta_interval(i,3), theta_interval(i,4)
+  end do
+
+  ! Writing the 3rd and 4th quadrants
+  do i=1, ninter
+    write(114,'(3(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,3), theta_interval(i,4)
+  end do
+
+  close(114)
+
+  print*, 'Write Branch dir    ---> Ok!'
+
+end subroutine brc_orientation
+
+!==============================================================================
+! Contacts orientation
+!==============================================================================
+subroutine frc_orientation(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                          :: i_, init_, last_
+  integer                                      :: i, j, ninter, contotal, cd, an
+  real(kind=8)                                 :: interval, Rnik, Rtik
+  real(kind=8)                                 :: angcurr, maxint, minint
+  real(kind=8), dimension(:,:), allocatable    :: theta_interval
+  real(kind=8), dimension(2)                   :: nik
+  character(len=26)                            :: f_name
+  logical                                      :: dir_ctcdir
+
+  ! Cleaning or creating the folder if necessary
+  if (i_ == init_) then
+    ! Asking if the file already exists
+    inquire(file='./POSTPRO/FRCDIR', exist=dir_ctcdir)
+    if(dir_ctcdir) then
+      ! Cleaning
+      call system('rm ./POSTPRO/FRCDIR/*')
+    else
+      ! Creating
+      call system('mkdir ./POSTPRO/FRCDIR')
+    end if
+  end if
+
+  ! The file name
+  f_name       =  './POSTPRO/FRCDIR/FDIR.    '
+
+  if (i_<10) then
+    WRITE(f_name(23:23),'(I1)')   i_
+  else if ( (i_>=10) .and. (i_<100) ) then
+    WRITE(f_name(23:24),'(I2)')   i_
+  else if ( (i_>=100).and. (i_<1000) ) then
+    WRITE(f_name(23:25),'(I3)')   i_
+  else if ( (i_>=1000).and. (i_<10000) ) then
+    WRITE(f_name(23:26),'(I4)')   i_
+  end if
+
+  ! Opening the file
+  open(unit=115,file=f_name,status='replace')
+
+  ! Number of intervals over pi
+  ninter = 36
+
+  ! Initializing variables
+  contotal = 0
+  interval = pi/ninter
+
+  ! Allocating the vector that will contain the contact direction and frequency
+  if (allocated(theta_interval)) deallocate(theta_interval)
+  allocate(theta_interval(ninter,4))
+
+  ! Computing the contact direction, initializing the frequency, and the total force sum
+  do i=1, ninter
+    theta_interval(i,1) = (interval/2)*(2*i-1)
+    theta_interval(i,2) = 0
+    theta_interval(i,3) = 0
+    theta_interval(i,4) = 0
+  end do
+
+  ! Computing the frequency for each interval
+  do i=1, ninter
+    ! The width of the interval
+    minint = interval*(i - 1)
+    maxint = interval*i
+    do j=1,n_contacts
+      cd = TAB_CONTACTS(j)%cd
+      an = TAB_CONTACTS(j)%an
+      ! Only between discs
+      if(TAB_CONTACTS(j)%nature == 'PLJCx' .or. TAB_CONTACTS(j)%nature == 'DKJCx') cycle
+
+      ! Only active contacts
+      if(abs(TAB_CONTACTS(j)%rn) .lt. 1.D-9) cycle
+
+      Rnik = TAB_CONTACTS(j)%rn
+      Rtik = TAB_CONTACTS(j)%rt
+
+      ! The normal vector
+      nik = TAB_CONTACTS(j)%n_frame
+
+      ! The 1 and 2 quadrants only
+      ! Changing the vector direction if necessary
+      if(nik(2) .lt. 0) then
+        nik(1) = -nik(1)
+        nik(2) = -nik(2)
+      end if
+
+      ! Finding the current angle. Note the vector nik is already unitary!
+      angcurr = acos(nik(1))
+
+      ! Checking the interval
+      if(angcurr .lt. maxint .and. angcurr .ge. minint) then
+        theta_interval(i,2) = theta_interval(i,2) + 1
+        theta_interval(i,3) = theta_interval(i,3) + Rnik
+        theta_interval(i,4) = theta_interval(i,4) + Rtik 
+      end if
+    end do
+  end do
+
+  ! Computing the number of active contacts
+  !do i=1, ninter
+  !  contotal = contotal + theta_interval(i,2)
+  !end do
+
+  ! The averages
+  theta_interval(:,3) = theta_interval(:,3)/(theta_interval(:,2))
+  theta_interval(:,4) = theta_interval(:,4)/(theta_interval(:,2))
+
+  ! Normalizing by the normal contact force
+  !theta_interval(:,4) = theta_interval(:,4)/(theta_interval(:,3))
+
+  ! Writing the heading
+  write(115,*) '# Theta(Rad) ', '    <fn>    ', '    <ft>    '
+
+  ! Writing
+  do i=1, ninter
+    write(115,'(3(1X,E12.5))') theta_interval(i,1), theta_interval(i,3), theta_interval(i,4)
+  end do
+
+  ! Writing the 3rd and 4th quadrants
+  do i=1, ninter
+    write(115,'(3(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,3), theta_interval(i,4)
+  end do
+
+  close(115)
+
+  print*, 'Write Forces dir    ---> Ok!'
+
+end subroutine frc_orientation
 
 !==============================================================================
 ! Computing rod's srains
@@ -2661,7 +3532,7 @@ subroutine draw(i_, init_, last_)
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
   ! How many fields there will be?
-  n_l_fields = 6                          ! They are: Id, Material, Disp, Veloc, Z (coordination), 
+  n_l_fields = 7                          ! They are: Id, Material, Disp, Veloc, Z (coordination), 
                                           !           float, group
   
   ! A blank space
@@ -2828,18 +3699,12 @@ subroutine draw(i_, init_, last_)
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Group
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
-  ! write(300,'(A,I1,I6,A)') 'Group ', 1, (n_particles + n_walls), ' float'
-  ! k = 0
-  ! l_counter = 1
+  write(300,'(A,I1,I6,A)') 'Group ', 1, (n_bodies+2*n_cluster), ' float'
+  k = 0
   
-  ! do i=1, n_particles + n_walls
-  !   if (i .le. n_particles) then
-  !     ! Material number 1
-  !     write(300, '(I6)') TAB_POLYG(i)%group
-  !   else      
-  !     write(300, '(I6)') -1
-  !   end if
-  ! end do
+  do i=1, n_bodies
+    write(300, '(I6)') TAB_BODIES(i)%group
+  end do
   
   ! And jump
   !write(300, '(A)') ' '
@@ -3282,127 +4147,7 @@ subroutine draw(i_, init_, last_)
 end subroutine draw
 
 
-! !==============================================================================
-! ! Contacts orientation
-! !==============================================================================
-! subroutine contact_direction
-  
-!   implicit none
-  
-!   real(kind=8)                                  :: interval
-!   real(kind=8)                                  :: angcurr, maxint, minint
-!   integer                                       :: i, j, ninter, contotal, contmean
-!   real(kind=8), dimension(:,:), allocatable     :: theta_interval
-!   real(kind=8), dimension(2)                    :: nik
-!   character(len=27)                             :: nom
-!   logical                                       :: dir_ctcdir
-  
-!   ! Cleaning or creating the folder if necessary
-!   if (first_over_all) then
-!     ! Asking if the file already exists
-!     inquire(file='./POSTPRO/CTCDIR', exist=dir_ctcdir)
-!     if(dir_ctcdir) then
-!       ! Cleaning
-!       call system('rm ./POSTPRO/CTCDIR/*')
-!     else
-!       ! Creating
-!       call system('mkdir ./POSTPRO/CTCDIR')
-!     end if
-!   end if
-  
-!   ! The file name
-!   nom       =  './POSTPRO/CTCDIR/CDIR.    '
-  
-!   if (compteur_clout<10) then
-!     WRITE(nom(23:24),'(I1)')   compteur_clout
-!   else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
-!     WRITE(nom(23:25),'(I2)')   compteur_clout
-!   else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
-!     WRITE(nom(23:26),'(I3)')   compteur_clout
-!   else if ( (compteur_clout>=1000).and. (compteur_clout<10000) ) then
-!     WRITE(nom(23:27),'(I4)')   compteur_clout
-!   else 
-!     print*, "Out of numbers ---> Orientations"
-!     stop
-!   end if
-  
-!   ! Number of intervals over pi
-!   ninter = 18
-  
-!   ! Initializing variables
-!   contotal = 0
-!   interval = pi/ninter
-  
-!   ! Allocating the vector that will contain the contact direction and frequency
-!   if (allocated(theta_interval)) deallocate(theta_interval)
-!   allocate(theta_interval(ninter,2))
-  
-!   ! Computing the contact direction and initializing the frequency
-!   do i=1, ninter
-!     theta_interval(i,1) = (interval/2)*(2*i-1)
-!     theta_interval(i,2) = 0
-!   end do
-  
-!   ! Computing the frequency for each interval
-!   do i=1, ninter
-!     ! The width of the interval
-!     minint = interval*(i - 1)
-!     maxint = interval*i
-!     do j=1,nb_ligneCONTACT_POLYG
-!       ! Only between discs
-!       if(TAB_CONTACTS_POLYG(j)%nature /='PLPLx') cycle
-!       ! Only active contacts
-!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .le. 1.D-8) cycle
-!       ! The normal vector
-!       nik(1)  = TAB_CONTACTS_POLYG(j)%n(1)
-!       nik(2)  = TAB_CONTACTS_POLYG(j)%n(2)
-      
-!       ! The 1 and 2 quadrants only
-!       ! Changing the normal vector direction if necessary
-!       if(nik(2) .lt. 0) then
-!         nik(1)  = -nik(1)
-!         nik(2)  = -nik(2)
-!       end if
-      
-!       ! Finding the current angle. Note the vector nik is already unitary!
-!       angcurr = acos(nik(1))
-      
-!       ! Checking the interval
-!       if(angcurr .lt. maxint .and. angcurr .ge. minint) then
-!         theta_interval(i,2) = theta_interval(i,2) + 1
-!       end if
-!     end do
-!   end do
-  
-!   ! Computing the number of active contacts
-!   do i=1, ninter
-!     contotal = contotal + theta_interval(i,2)
-!   end do
-  
-!   ! Normalizing
-!   theta_interval(:,2) = theta_interval(:,2)/(contotal*interval)
-  
-!   ! Opening the file
-!   open(unit=110,file=nom,status='replace')
-  
-!   ! Writing the heading 
-!   write(110,*) '# Theta(Rad) ', '  Freq_norm  '
-  
-!   ! Writing
-!   do i=1, ninter
-!     write(110,'(2(1X,E12.5))') theta_interval(i,1), theta_interval(i,2)
-!   end do
-  
-!   ! Writing the 3rd and 4th quadrants
-!   do i=1, ninter
-!     write(110,'(2(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,2)
-!   end do
-  
-!   close(110)
-  
-!   print*, 'Write Contacts dir              ---> Ok!'
-  
-! end subroutine contact_direction
+
 
 ! !==============================================================================
 ! ! Branch orientations
@@ -3540,71 +4285,6 @@ end subroutine draw
 !   print*, 'Write branch dir              ---> Ok!'
   
 ! end subroutine ctc_dir_l
-
-! !==============================================================================
-! ! Contact forces lists for PDF and more
-! !==============================================================================
-! subroutine f_list
-
-!   implicit none
-
-!   integer                                       :: i
-!   real*8                                        :: Rnik, Rtik
-!   character(len=26)                             :: file_c
-!   logical                                       :: dir_ctcdir
-
-!   ! Cleaning or creating the folder if necessary
-!   if (first_over_all) then
-!     ! Asking if the file already exists
-!     inquire(file='./POSTPRO/F_LIST', exist=dir_ctcdir)
-!     if(dir_ctcdir) then
-!       ! Cleaning
-!       call system('rm ./POSTPRO/F_LIST/*')
-!     else
-!       ! Creating
-!       call system('mkdir ./POSTPRO/F_LIST')
-!     end if
-!   end if
-
-!   ! The file name
-!   file_c       =  './POSTPRO/F_LIST/F_L.    '
-
-!   if (compteur_clout<10) then
-!     WRITE(file_c(22:23),'(I1)')   compteur_clout
-!   else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
-!     WRITE(file_c(22:24),'(I2)')   compteur_clout
-!   else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
-!     WRITE(file_c(22:25),'(I3)')   compteur_clout
-!   else if ( (compteur_clout>=1000).and. (compteur_clout<10000) ) then
-!     WRITE(file_c(22:26),'(I4)')   compteur_clout
-!   end if
-
-!   ! Opening the file
-!   open(unit=112,file=file_c,status='replace')
-
-!   ! Writing the heading
-!   write(112,*) '     FN     ', '     FT      '
-
-!   do i=1, nb_ligneCONTACT_POLYG
-!     ! Only contacts between particles
-!     if (TAB_CONTACTS_POLYG(i)%nature == 'PLJCx') cycle
-!     Rnik = TAB_CONTACTS_POLYG(i)%rt
-!     Rtik = TAB_CONTACTS_POLYG(i)%rn
-!     ! Only forces above a given threshold
-!     if (option_cohe == 1) then
-!       if (abs(Rnik) .lt. 1e-10 .and. abs(Rtik) .lt. 1e-10) cycle
-!     else
-!       if (Rnik .lt. 1e-10) cycle
-!     end if
-
-!     write(112,'(2(1X,E12.5))') Rnik, Rtik
-!   end do
-
-!   close(112)
-
-!   print*, 'Write Contacts Forces           ---> Ok!'
-
-! end subroutine f_list
 
 ! !================================================
 ! ! Estimating the failure type of contacts
@@ -3913,160 +4593,6 @@ end subroutine draw
 !   print*, 'Write Interaction List L       ---> Ok!'
 ! end subroutine list_interact_l
 
-
-
-! !==============================================================================
-! ! Branch orientation
-! !==============================================================================
-! subroutine branch_dir
-
-!   implicit none
-
-!   integer                                      :: i, j, ninter, contotal, cd, an
-!   real(kind=8)                                 :: interval, pro_n, pro_t
-!   real(kind=8)                                 :: angcurr, maxint, minint
-!   real(kind=8), dimension(3)                   :: nik, Lik, tik, sik, tanik
-!   real(kind=8), dimension(:,:), allocatable    :: theta_interval
-!   character(len=26)                            :: file_name
-!   logical                                      :: dir_ctcdir
-
-!   ! Cleaning or creating the folder if necessary
-!   if (first_over_all) then
-!     ! Asking if the file already exists
-!     inquire(file='./POSTPRO/BRCDIR', exist=dir_ctcdir)
-!     if(dir_ctcdir) then
-!       ! Cleaning
-!       call system('rm ./POSTPRO/BRCDIR/*')
-!     else
-!       ! Creating
-!       call system('mkdir ./POSTPRO/BRCDIR')
-!     end if
-!   end if
-
-!   ! The file name
-!   file_name       =  './POSTPRO/BRCDIR/BDIR.    '
-
-!   if (compteur_clout<10) then
-!     WRITE(file_name(23:23),'(I1)')   compteur_clout
-!   else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
-!     WRITE(file_name(23:24),'(I2)')   compteur_clout
-!   else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
-!     WRITE(file_name(23:25),'(I3)')   compteur_clout
-!   else if ( (compteur_clout>=1000).and. (compteur_clout<10000) ) then
-!     WRITE(file_name(23:26),'(I4)')   compteur_clout
-!   end if
-
-!   ! Opening the file
-!   open(unit=115,file=file_name,status='replace')
-
-!   ! Number of intervals over pi
-!   ninter = 36
-
-!   ! Initializing variables
-!   contotal = 0
-!   interval = pi/ninter
-
-!   ! Allocating the vector that will contain the contact direction and frequency
-!   if (allocated(theta_interval)) deallocate(theta_interval)
-!   allocate(theta_interval(ninter,4))
-
-!   ! Computing the contact direction, initializing the frequency, and the total branch sum
-!   do i=1, ninter
-!     theta_interval(i,1) = (interval/2)*(2*i-1)
-!     theta_interval(i,2) = 0
-!     theta_interval(i,3) = 0
-!     theta_interval(i,4) = 0
-!   end do
-
-!   ! Computing the frequency for each interval
-!   do i=1, ninter
-!     ! The width of the interval
-!     minint = interval*(i - 1)
-!     maxint = interval*i
-!     do j=1,nb_ligneCONTACT_POLYG
-!       cd = TAB_CONTACTS_POLYG(j)%icdent
-!       an = TAB_CONTACTS_POLYG(j)%ianent
-!       ! Only between discs
-!       if(TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
-
-!       ! Only active contacts
-!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .lt. 1.D-9) cycle
-
-!       ! The branch vector
-!       Lik(:) = TAB_POLYG(cd)%center(:)-TAB_POLYG(an)%center(:)
-
-!       ! Not joining contacts in the periodic zones
-!       if (sqrt(Lik(1)**2 + Lik(2)**2) .gt. 3.*(TAB_POLYG(cd)%radius + TAB_POLYG(an)%radius)) cycle
-
-!       ! The normal vector
-!       nik  = TAB_CONTACTS_POLYG(j)%n
-
-!       ! The tangential vector - xz plane!
-!       !tik = TAB_CONTACTS(j)%t
-!       !sik = TAB_CONTACTS(j)%s
-!       !tanik = sik*TAB_CONTACTS(j)%rs + tik*TAB_CONTACTS(j)%rt
-
-!       ! unitary
-!       !tanik = tanik/sqrt(tanik(1)**2 + tanik(2)**2 + tanik(3)**2)
-
-!       ! Normal projection
-!       pro_n = abs(Lik(1)*nik(1) + Lik(2)*nik(2))
-
-!       ! The 1 and 2 quadrants only
-!       ! Changing the vector direction if necessary
-!       if(nik(2) .lt. 0) then
-!         nik(1) = -nik(1)
-!         nik(2) = -nik(2)
-!       end if
-
-!       tanik(1) = nik(2)
-!       tanik(2) = -nik(1)
-
-!       ! Tangential projection
-!       pro_t = Lik(1)*tanik(1) + Lik(2)*tanik(2)
-
-!       !if (pro_n .lt. 0.6*pro_t) cycle
-
-!       ! Finding the current angle. Note the vector nik is unitary!
-!       angcurr = acos(nik(1)/sqrt(nik(1)**2 + nik(2)**2))
-
-!       ! Checking the interval
-!       if(angcurr .lt. maxint .and. angcurr .ge. minint) then
-!         theta_interval(i,2) = theta_interval(i,2) + 1
-!         theta_interval(i,3) = theta_interval(i,3) + pro_n
-!         theta_interval(i,4) = theta_interval(i,4) + pro_t
-!       end if
-!     end do
-!   end do
-
-!   ! Computing the number of active contacts
-!   do i=1, ninter
-!     contotal = contotal + theta_interval(i,2)
-!   end do
-
-!   ! The averages
-!   theta_interval(:,3) = theta_interval(:,3)/(theta_interval(:,2)*2)
-!   theta_interval(:,4) = theta_interval(:,4)/(theta_interval(:,2)*2)
-
-!   ! Writing the heading
-!   write(115,*) '# Theta(Rad) ', '    <ln>    ', '    <lt>    '
-
-!   ! Writing
-!   do i=1, ninter
-!     write(115,'(3(1X,E12.5))') theta_interval(i,1), theta_interval(i,3), theta_interval(i,4)
-!   end do
-
-!   ! Writing the 3rd and 4th quadrants
-!   do i=1, ninter
-!     write(115,'(3(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,3), theta_interval(i,4)
-!   end do
-
-!   close(115)
-
-!   print*, 'Write Branch dir    ---> Ok!'
-
-! end subroutine branch_dir
-
 ! !==============================================================================
 ! ! Branch orientation on L
 ! !==============================================================================
@@ -4219,179 +4745,6 @@ end subroutine draw
 !   print*, 'Write Branch dir L   ---> Ok!'
 
 ! end subroutine brc_dir_l
-
-
-! !==============================================================================
-! ! Contacts orientation
-! !==============================================================================
-! subroutine forces_dir
-
-!   implicit none
-
-!   integer                                      :: i, j, ninter, contotal, cd, an
-!   real(kind=8)                                 :: interval, pro_n, pro_t, Rnik, Rtik, Rsik
-!   real(kind=8)                                 :: angcurr, maxint, minint
-!   real(kind=8), dimension(:,:), allocatable    :: theta_interval
-!   real(kind=8), dimension(3)                   :: nik, Fik, tik, sik, tanik, tanik_plane
-!   character(len=26)                            :: file_name
-!   logical                                      :: dir_ctcdir
-
-!   ! Cleaning or creating the folder if necessary
-!   if (first_over_all) then
-!     ! Asking if the file already exists
-!     inquire(file='./POSTPRO/FRCDIR', exist=dir_ctcdir)
-!     if(dir_ctcdir) then
-!       ! Cleaning
-!       call system('rm ./POSTPRO/FRCDIR/*')
-!     else
-!       ! Creating
-!       call system('mkdir ./POSTPRO/FRCDIR')
-!     end if
-!   end if
-
-!   ! The file name
-!   file_name       =  './POSTPRO/FRCDIR/FDIR.    '
-
-!   if (compteur_clout<10) then
-!     WRITE(file_name(23:23),'(I1)')   compteur_clout
-!   else if ( (compteur_clout>=10) .and. (compteur_clout<100) ) then
-!     WRITE(file_name(23:24),'(I2)')   compteur_clout
-!   else if ( (compteur_clout>=100).and. (compteur_clout<1000) ) then
-!     WRITE(file_name(23:25),'(I3)')   compteur_clout
-!   else if ( (compteur_clout>=1000).and. (compteur_clout<10000) ) then
-!     WRITE(file_name(23:26),'(I4)')   compteur_clout
-!   end if
-
-!   ! Opening the file
-!   open(unit=116,file=file_name,status='replace')
-
-!   ! Number of intervals over pi
-!   ninter = 36
-
-!   ! Initializing variables
-!   contotal = 0
-!   interval = pi/ninter
-
-!   ! Allocating the vector that will contain the contact direction and frequency
-!   if (allocated(theta_interval)) deallocate(theta_interval)
-!   allocate(theta_interval(ninter,4))
-
-!   ! Computing the contact direction, initializing the frequency, and the total force sum
-!   do i=1, ninter
-!     theta_interval(i,1) = (interval/2)*(2*i-1)
-!     theta_interval(i,2) = 0
-!     theta_interval(i,3) = 0
-!     theta_interval(i,4) = 0
-!   end do
-
-!   ! Computing the frequency for each interval
-!   do i=1, ninter
-!     ! The width of the interval
-!     minint = interval*(i - 1)
-!     maxint = interval*i
-!     do j=1,nb_ligneCONTACT_POLYG
-!       cd = TAB_CONTACTS_POLYG(j)%icdent
-!       an = TAB_CONTACTS_POLYG(j)%ianent
-!       ! Only between discs
-!       if(TAB_CONTACTS_POLYG(j)%nature == 'PLJCx') cycle
-
-!       ! Only active contacts
-!       if(abs(TAB_CONTACTS_POLYG(j)%rn) .lt. 1.D-9) cycle
-
-!       Rnik = TAB_CONTACTS_POLYG(j)%rn
-!       Rtik = TAB_CONTACTS_POLYG(j)%rt
-
-!       ! The normal vector
-!       nik = TAB_CONTACTS_POLYG(j)%n
-
-!       ! The tangential vector
-!       tik = TAB_CONTACTS_POLYG(j)%t
-!       ! The real tangential vector - in xz plane!
-!       !tanik(1:3) = Rsik*sik(1:3) + Rtik*tik(1:3)
-!       tanik(1) = nik(2)
-!       tanik(2) = -nik(1)
-
-!       ! The force vector
-!       Fik(1:2) = (Rnik*nik(1:2)+Rtik*tik(1:2))
-
-!       ! unitary!
-!       !tanik = tanik/sqrt(tanik(1)**2 + tanik(2)**2 + tanik(3)**2)
-
-!       ! Normal projection
-!       pro_n = abs(Fik(1)*nik(1) + Fik(2)*nik(2))
-
-!       !print*, 'ini'
-!       !print*, pro_n
-!       !print*, TAB_CONTACTS(j)%rn
-!       !print*, TAB_CONTACTS(j)%n
-!       !print*, Fik
-!       !print*, 'asdasd'
-!       !tanik_plane(1) = Rsik*sik(1) + Rtik*tik(1)
-!       !tanik_plane(2) = 0
-!       !tanik_plane(3) = Rsik*sik(3) + Rtik*tik(3)
-
-!       !tanik_plane = tanik_plane/sqrt(tanik_plane(1)**2+tanik_plane(3)**2)
-
-!       ! Tangential projection in the xz plane!!!
-!       !pro_t = abs(Fik(1)*tanik(1) + Fik(2)*tanik(2) + Fik(3)*tanik(3))
-!       pro_t = Fik(1)*tanik(1) + Fik(2)*tanik(2)
-!       !print*, 'ini'
-!       !print*, pro_t
-!       !print*, Rtik
-!       !print*, Rsik
-!       !print*, sqrt(Rsik**2+Rtik**2)
-!       !print*, 'asdasd'
-
-!       ! The 1 and 2 quadrants only
-!       ! Changing the vector direction if necessary
-!       if(nik(2) .lt. 0) then
-!         nik(1) = -nik(1)
-!         nik(2) = -nik(2)
-!       end if
-
-!       ! Finding the current angle. Note the vector nik is already unitary!
-!       angcurr = acos(nik(1)/sqrt(nik(1)**2 + nik(2)**2))
-
-!       ! Checking the interval
-!       if(angcurr .lt. maxint .and. angcurr .ge. minint) then
-!         theta_interval(i,2) = theta_interval(i,2) + 1
-!         theta_interval(i,3) = theta_interval(i,3) + pro_n
-!         theta_interval(i,4) = theta_interval(i,4) + pro_t
-!       end if
-!     end do
-!   end do
-
-!   ! Computing the number of active contacts
-!   !do i=1, ninter
-!   !  contotal = contotal + theta_interval(i,2)
-!   !end do
-
-!   ! The averages
-!   theta_interval(:,3) = theta_interval(:,3)/(theta_interval(:,2)*2)
-!   theta_interval(:,4) = theta_interval(:,4)/(theta_interval(:,2)*2)
-
-!   ! Normalizing by the normal contact force
-!   !theta_interval(:,4) = theta_interval(:,4)/(theta_interval(:,3))
-
-!   ! Writing the heading
-!   write(116,*) '# Theta(Rad) ', '    <fn>    ', '    <ft>    '
-
-!   ! Writing
-!   do i=1, ninter
-!     write(116,'(3(1X,E12.5))') theta_interval(i,1), theta_interval(i,3), theta_interval(i,4)
-!   end do
-
-!   ! Writing the 3rd and 4th quadrants
-!   do i=1, ninter
-!     write(116,'(3(1X,E12.5))') theta_interval(i,1)+pi, theta_interval(i,3), theta_interval(i,4)
-!   end do
-
-!   close(116)
-
-!   print*, 'Write Forces dir    ---> Ok!'
-
-! end subroutine forces_dir
-
 
 ! !==============================================================================
 ! ! Forces orientation on Ls
