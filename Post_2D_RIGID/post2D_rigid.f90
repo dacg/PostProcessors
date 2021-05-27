@@ -1702,7 +1702,7 @@ subroutine ctc_anisotropy(i_, init_, last_)
     Rnik    = TAB_CONTACTS(i)%rn
     
     ! Checking the normal force is not zero
-    if (abs(Rnik) .le. 1.D-9) cycle
+    if (abs(Rnik) .le. 1.D-8) cycle
    
     Fabric(1,1:2) = nik(1)*nik(1:2) + Fabric(1,1:2)
     Fabric(2,1:2) = nik(2)*nik(1:2) + Fabric(2,1:2)
@@ -1757,7 +1757,7 @@ subroutine brc_anisotropy(i_, init_, last_)
   ! If this is the first time, we open the file and write the heading
   if (i_ == init_) then
     open (unit=107,file='./POSTPRO/BRC_ANISOTROPY.DAT',status='replace')
-    write(107,*) '#   time     ','    a_ln+ac    ','  a_lt+a_ln-2ac    '
+    write(107,*) '#   time     ','    a_ln+ac    ','  a_lt+a_ln+2ac    '
   end if
   
   ! Building the chi tensor with the length of branches 
@@ -1773,7 +1773,7 @@ subroutine brc_anisotropy(i_, init_, last_)
     Rnik    = TAB_CONTACTS(i)%rn
     
     ! Only active contacts
-    if (abs(Rnik) .le. 1.D-9) cycle
+    if (abs(Rnik) .le. 1.D-8) cycle ! OJO SACAR CONTACTOS CERCA AL LA PARED (MY_LIST)
     
     ! Active contacts
     cpt = cpt + 1
@@ -1795,7 +1795,7 @@ subroutine brc_anisotropy(i_, init_, last_)
     end if 
     
     ! Average branch length
-    av_length = av_length + (Lik(1)**2 + Lik(2)**2)**0.5
+    av_length = av_length + (Lik(1)*nik(1) + Lik(2)*nik(2))
     
     Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
     Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
@@ -1871,7 +1871,7 @@ subroutine frc_anisotropy(i_, init_, last_)
   ! If this is the first time, we open the file and write the heading
   if (i_ == init_) then
     open (unit=108,file='./POSTPRO/BRC_ANISOTROPY.DAT',status='replace')
-    write(108,*) '#   time     ','    a_fn+ac    ','  a_ft+a_fn-2ac    '
+    write(108,*) '#   time     ','    a_fn+ac    ','  a_ft+a_fn+2ac    '
   end if
   
   ! Building the fabric forces tensor
@@ -1888,7 +1888,7 @@ subroutine frc_anisotropy(i_, init_, last_)
     Rtik    = TAB_CONTACTS(i)%rt
     
     ! Only active contacts
-    if (abs(Rnik) .le. 1.D-9) cycle
+    if (abs(Rnik) .le. 1.D-8) cycle
     
     ! Active contacts
     cpt     = cpt + 1
