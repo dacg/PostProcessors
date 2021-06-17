@@ -73,6 +73,7 @@ character(len=30)                          ::  command
 integer                                    ::  c_coordination=0, c_compacity=0, c_qoverp=0, c_ctc_anisotropy=0, &
                                                c_frc_anisotropy=0, c_brc_anisotropy=0, c_granulo=0, & 
                                                c_walls_pos=0, c_walls_frc = 0, c_ctc_ori = 0, c_brc_ori=0, c_frc_ori=0, &
+                                               c_ctc_anisotropy_l = 0, c_frc_anisotropy_l=0, c_brc_anisotropy_l=0, &
                                                c_nctc_probability=0, c_frc_list=0, option_cohe=0, c_fail_mode=0,  &
                                                c_list_interact=0, c_sign_aniso=0, c_clean_tresca=0, c_multi_part_frac=0, &
                                                c_avg_shape_ratio=0, c_sign_aniso_l=0, c_list_interact_l = 0, c_ctc_dir_l=0, & 
@@ -234,6 +235,24 @@ do
   if (command=='FORCES ORIENTATION           :') then
     c_frc_ori = 1
     ! Uses port 115
+    cycle
+  end if
+
+  if (command=='ANISOTROPY CONTACT L         :') then
+    c_ctc_anisotropy_l = 1
+    ! Uses port 116
+    cycle
+  end if
+
+  if (command=='ANISOTROPY FORCE L           :') then
+    c_frc_anisotropy_l = 1
+    ! Uses port 117
+    cycle
+  end if
+
+  if (command=='ANISOTROPY BRANCH L          :') then
+    c_brc_anisotropy_l = 1
+    ! Uses port 118
     cycle
   end if
 
@@ -420,6 +439,10 @@ do ii=init_frame, last_frame
   if (c_ctc_ori                == 1)  call ctc_orientation(ii,init_frame,last_frame)
   if (c_brc_ori                == 1)  call brc_orientation(ii,init_frame,last_frame)
   if (c_frc_ori                == 1)  call frc_orientation(ii,init_frame,last_frame)
+  if (c_ctc_anisotropy_l       == 1)  call ctc_anisotropy_l(ii,init_frame,last_frame)
+  if (c_brc_anisotropy_l       == 1)  call brc_anisotropy_l(ii,init_frame,last_frame)
+  if (c_frc_anisotropy_l       == 1)  call frc_anisotropy_l(ii,init_frame,last_frame)
+
 
   if (c_rod_strain             == 1)  call rod_strain(ii,init_frame,last_frame)
   if (c_kin_energy             == 1)  call kin_energy(ii,init_frame,last_frame)
@@ -1870,7 +1893,7 @@ subroutine frc_anisotropy(i_, init_, last_)
 
   ! If this is the first time, we open the file and write the heading
   if (i_ == init_) then
-    open (unit=108,file='./POSTPRO/BRC_ANISOTROPY.DAT',status='replace')
+    open (unit=108,file='./POSTPRO/FRC_ANISOTROPY.DAT',status='replace')
     write(108,*) '#   time     ','    a_fn+ac    ','  a_ft+a_fn+2ac    '
   end if
   
@@ -1942,6 +1965,337 @@ subroutine frc_anisotropy(i_, init_, last_)
   print*, 'Write Anisotropy Force          ---> Ok!'
 
 end subroutine frc_anisotropy
+
+!==============================================================================
+! Computing the fabric anisotropy
+!==============================================================================
+subroutine ctc_anisotropy_l(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i, cd, an
+  integer                                  :: ierror, matz, lda
+  real(kind=8),dimension(2)                :: nik, Lik
+  real(kind=8),dimension(2,2)              :: Fabric
+  real(kind=8),dimension(2)                :: wr,wi
+  real(kind=8)                             :: S1, S2, cpt, Rnik
+  real(kind=8),dimension(2,2)              :: localframe
+  
+  ! Initializing 
+  cpt = 0
+  Fabric(:,:) = 0.
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=116,file='./POSTPRO/CTC_ANISOTROPY_L.DAT',status='replace')
+    write(116,*) '#   time     ','      ac      '
+  end if
+  
+  ! Building the fabric tensor
+  do i=1, n_contacts
+    ! Checking it is a contact between two bodies
+    if(TAB_CONTACTS(i)%nature == 'PLJCx') cycle
+    if(TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if(TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    cd      = TAB_CONTACTS(i)%cd
+    an      = TAB_CONTACTS(i)%an
+
+    Lik = TAB_BODIES(cd)%center - TAB_BODIES(an)%center
+
+    if (flag_periodic==1) then
+      ! Correcting the branch orientation and length if necessary
+      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+        ! This is a peridic case
+        if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+          Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
+        end if
+        ! Y component
+        !if (Lik(2) .gt. (max_d_vert_an + max_d_vert_cd)) then
+        !Lik(2) = Lik(2) - y_period*(Lik(2)/abs(Lik(2)))
+      end if
+    end if 
+
+    ! The unitary vector of the branch
+    nik     = Lik/(Lik(1)**2 + Lik(2)**2)**0.5
+
+    Rnik    = TAB_CONTACTS(i)%rn
+    
+    ! Checking the normal force is not zero
+    if (abs(Rnik) .le. 1.D-8) cycle
+   
+    Fabric(1,1:2) = nik(1)*nik(1:2) + Fabric(1,1:2)
+    Fabric(2,1:2) = nik(2)*nik(1:2) + Fabric(2,1:2)
+    cpt = cpt + 1
+  end do
+  
+  ! Normalizing by the number of contacts
+  Fabric = Fabric / cpt
+  
+  ! Finding the eigen values
+  lda  = 2
+  matz = 1
+  
+  call rg ( lda, 2, Fabric, wr, wi, matz, localframe, ierror )
+  S1 = max( wr(1),wr(2) )
+  S2 = min( wr(1),wr(2) )
+  
+  write(116,'(2(1X,E12.5))') time, 2*(S1-S2)
+  
+  if (i_ == last_) then
+    close(116)
+  end if
+  
+  ! General info
+  print*, 'Write Anisotropy Conctacts L    ---> Ok!'
+end subroutine ctc_anisotropy_l
+
+!==============================================================================
+! Computing the branch anisotropy
+!==============================================================================
+subroutine brc_anisotropy_l(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i,cd,an
+  integer                                  :: ierror,matz,lda
+  real(kind=8)                             :: X1n,X2n, X1f,X2f,cpt,av_length, Lnik, Ltik, Rnik
+  real(kind=8), dimension(2)               :: nik,tik, Lik
+  real(kind=8), dimension(2)               :: wrn, win, wrf, wif
+  real(kind=8), dimension(2,2)             :: Fabric_N,Fabric_T, Fabric_F
+  real(kind=8), dimension(2,2)             :: localframeN, localframeF
+  
+  ! Initializing variables
+  Fabric_N(:,:) = 0.
+  Fabric_T(:,:) = 0.
+  Fabric_F(:,:) = 0.
+  cpt = 0.
+  av_length = 0.
+  Lik(:) = 0.
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=117,file='./POSTPRO/BRC_ANISOTROPY_L.DAT',status='replace')
+    write(117,*) '#   time     ','    a_ln+ac    ','  a_lt+a_ln+2ac    '
+  end if
+  
+  ! Building the chi tensor with the length of branches 
+  do i=1,n_contacts
+    if  (TAB_CONTACTS(i)%nature == 'PLJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    cd      = TAB_CONTACTS(i)%cd
+    an      = TAB_CONTACTS(i)%an
+    
+    Rnik    = TAB_CONTACTS(i)%rn
+    
+    ! Only active contacts
+    if (abs(Rnik) .le. 1.D-8) cycle ! OJO SACAR CONTACTOS CERCA AL LA PARED (MY_LIST)
+    
+    ! Active contacts
+    cpt = cpt + 1
+    
+    ! The branch vector
+    Lik = TAB_BODIES(cd)%center - TAB_BODIES(an)%center
+
+    if (flag_periodic==1) then
+      ! Correcting the branch orientation and length if necessary
+      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+        ! This is a peridic case
+        if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+          Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
+        end if
+        ! Y component
+        !if (Lik(2) .gt. (max_d_vert_an + max_d_vert_cd)) then
+        !Lik(2) = Lik(2) - y_period*(Lik(2)/abs(Lik(2)))
+      end if
+    end if 
+
+    ! The unitary normal vector of the branch
+    nik     = Lik/(Lik(1)**2 + Lik(2)**2)**0.5
+
+    ! The unitary tangential vector of the branch
+    tik(1)  = nik(2)
+    tik(2)  = -nik(1)
+    
+    ! Average branch length
+    av_length = av_length + (Lik(1)*nik(1) + Lik(2)*nik(2))
+    
+    Lnik = Lik(1)*nik(1)+Lik(2)*nik(2)
+    Ltik = Lik(1)*tik(1)+Lik(2)*tik(2)
+    
+    ! Building the chi_n
+    Fabric_N(1,1:2) = Lnik*nik(1)*nik(1:2) + Fabric_N(1,1:2)
+    Fabric_N(2,1:2) = Lnik*nik(2)*nik(1:2) + Fabric_N(2,1:2)
+    
+    ! Building the chi_t
+    Fabric_T(1,1:2) = Ltik*nik(1)*tik(1:2) + Fabric_T(1,1:2)
+    Fabric_T(2,1:2) = Ltik*nik(2)*tik(1:2) + Fabric_T(2,1:2)
+  end do
+  
+  ! Computing the average branch length
+  av_length = av_length / cpt
+  
+  ! Computing the fabric forces tensors
+  Fabric_N = Fabric_N / (cpt*av_length)
+  Fabric_T = Fabric_T / (cpt*av_length)
+  
+  ! Building the full fabric forces tensor (Build this always before using rg!!!)
+  Fabric_F = Fabric_N + Fabric_T
+  
+  ! Finding the eigen values of the fabric normal forces tensor
+  lda = 2
+  matz = 1
+  
+  call rg(lda, 2, Fabric_N, wrn, win, matz, localframeN, ierror)
+  
+  X1n = max(wrn(1),wrn(2))
+  X2n = min(wrn(1),wrn(2))
+  
+  ! Finding the eigen values of the full fabric forces tensor
+  call rg(lda, 2, Fabric_F, wrf, wif, matz, localframeF, ierror)
+  X1f = max(wrf(1),wrf(2))
+  X2f = min(wrf(1),wrf(2))
+  
+  write(117,'(3(1X,E12.5))') time, 2*(X1n-X2n)/(X1n+X2n),2*(X1f-X2f)/(X1f+X2f)
+  
+  if (i_ == last_) then
+    close(117)
+  end if
+  
+  ! General info
+  print*, 'Write Anisotropy Branch L        ---> Ok!'
+
+end subroutine brc_anisotropy_l
+
+!==============================================================================
+! Computing the force anisotropy
+!==============================================================================
+subroutine frc_anisotropy_l(i_, init_, last_)
+  
+  implicit none
+  
+  integer, intent(in)                      :: i_, init_, last_
+  integer                                  :: i,cd,an
+  integer                                  :: ierror,matz,lda
+  real(kind=8)                             :: X1n,X2n, X1f,X2f,cpt,Rtik,Rnik,av_force, Rnik_c, Rtik_c
+  real(kind=8), dimension(2)               :: nik,tik, nik_c, tik_c, Fik, Lik
+  real(kind=8), dimension(2)               :: wrn, win, wrf, wif
+  real(kind=8), dimension(2,2)             :: Fabric_N,Fabric_T, Fabric_F
+  real(kind=8), dimension(2,2)             :: localframeN, localframeF
+  
+  ! Initializing variables
+  Fabric_N(:,:) = 0.
+  Fabric_T(:,:) = 0.
+  Fabric_F(:,:) = 0.
+  cpt = 0.
+  av_force = 0.
+  Fik(:) = 0.
+
+  ! If this is the first time, we open the file and write the heading
+  if (i_ == init_) then
+    open (unit=118,file='./POSTPRO/FRC_ANISOTROPY_L.DAT',status='replace')
+    write(118,*) '#   time     ','    a_fn+ac    ','  a_ft+a_fn+2ac    '
+  end if
+  
+  ! Building the fabric forces tensor
+  do i=1,n_contacts
+    if  (TAB_CONTACTS(i)%nature == 'PLJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'DKJCx') cycle
+    if  (TAB_CONTACTS(i)%nature == 'PTPTx') cycle
+
+    cd      = TAB_CONTACTS(i)%cd
+    an      = TAB_CONTACTS(i)%an
+    nik_c     = TAB_CONTACTS(i)%n_frame
+    tik_c     = TAB_CONTACTS(i)%t_frame
+    
+    Rnik_c    = TAB_CONTACTS(i)%rn
+    Rtik_c    = TAB_CONTACTS(i)%rt
+    
+    ! Only active contacts
+    if (abs(Rnik_c) .le. 1.D-8) cycle
+
+       ! The branch vector
+    Lik = TAB_BODIES(cd)%center - TAB_BODIES(an)%center
+
+    if (flag_periodic==1) then
+      ! Correcting the branch orientation and length if necessary
+      if ((Lik(1)**2 + Lik(2)**2)**0.5 .gt. 2*(TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+        ! This is a peridic case
+        if (Lik(1) .gt. (TAB_BODIES(cd)%radius+TAB_BODIES(an)%radius)) then
+          Lik(1) = Lik(1) - l_periodic*(Lik(1)/abs(Lik(1)))
+        end if
+        ! Y component
+        !if (Lik(2) .gt. (max_d_vert_an + max_d_vert_cd)) then
+        !Lik(2) = Lik(2) - y_period*(Lik(2)/abs(Lik(2)))
+      end if
+    end if 
+
+    ! The unitary normal vector of the branch
+    nik     = Lik/(Lik(1)**2 + Lik(2)**2)**0.5
+
+    ! The unitary tangential vector of the branch
+    tik(1)  = nik(2)
+    tik(2)  = -nik(1)
+    
+    ! Active contacts
+    cpt     = cpt + 1
+    
+    ! The force vector
+    Fik(:) = Rnik_c*nik_c(:) + Rtik_c*tik_c(:)
+    
+    ! Average normal force projected on the branch
+    av_force = av_force + Fik(1)*nik(1) + Fik(2)*nik(2)
+
+    Rnik = Fik(1)*nik(1) + Fik(2)*nik(2)
+    Rtik = Fik(1)*tik(1) + Fik(2)*tik(2)
+    
+    ! Building the tensor of normal forces
+    Fabric_N(1,1:2) = Rnik*nik(1)*nik(1:2) + Fabric_N(1,1:2)
+    Fabric_N(2,1:2) = Rnik*nik(2)*nik(1:2) + Fabric_N(2,1:2)
+    
+    ! Building the tensor of tangential forces
+    Fabric_T(1,1:2) = Rtik*nik(1)*tik(1:2) + Fabric_T(1,1:2)
+    Fabric_T(2,1:2) = Rtik*nik(2)*tik(1:2) + Fabric_T(2,1:2)
+  end do
+  
+  ! Computing the average normal force
+  av_force = av_force / cpt
+  
+  ! Computing the fabric forces tensors
+  Fabric_N = Fabric_N / (cpt*av_force)
+  Fabric_T = Fabric_T / (cpt*av_force)
+  
+  ! Building the full fabric forces tensor (Build this always before using rg!!!)
+  Fabric_F = Fabric_N + Fabric_T
+  
+  ! Finding the eigen values of the fabric normal forces tensor
+  lda = 2
+  matz = 1
+  
+  call rg(lda, 2, Fabric_N, wrn, win, matz, localframeN, ierror)
+  
+  X1n = max(wrn(1),wrn(2))
+  X2n = min(wrn(1),wrn(2))
+  
+  ! Finding the eigen values of the full fabric forces tensor
+  call rg(lda, 2, Fabric_F, wrf, wif, matz, localframeF, ierror)
+  X1f = max(wrf(1),wrf(2))
+  X2f = min(wrf(1),wrf(2))
+
+  write(118,'(3(1X,E12.5))') time, 2*(X1n-X2n)/(X1n+X2n),2*(X1f-X2f)/(X1f+X2f)
+
+  if (i_ == last_) then
+    close(118)
+  end if
+  
+  ! General info
+  print*, 'Write Anisotropy Force L        ---> Ok!'
+
+end subroutine frc_anisotropy_l
 
 !==============================================================================
 ! Grain size distribution
